@@ -1,0 +1,11 @@
+{
+  "name": "textforge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first rich text document workspace",
+  "scripts": {
+    "start": "node dev-server.js",
+    "check": "node --check app.js && node --check forge-snapshot.js && node --check textforge-diagnostics.js"
+  },
+  "license": "UNLICENSED"
+}
