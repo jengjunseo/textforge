@@ -108,11 +108,13 @@
       <main class="workspace">
         <header class="topbar">
           <div class="doc-title-wrap">
-            <input id="titleInput" class="title-input" aria-label="문서 제목" />
-            <div class="meta-row">
+            <div class="title-line">
+              <input id="titleInput" class="title-input" aria-label="문서 제목" />
               <button id="favoriteBtn" class="star-btn" title="즐겨찾기" aria-label="즐겨찾기">☆</button>
-              <input id="tagInput" class="tag-input" aria-label="태그" placeholder="태그: report, prompt, idea" />
               <p id="saveState" class="save-state">저장됨</p>
+            </div>
+            <div class="meta-row hidden-tag-row" aria-hidden="true">
+              <input id="tagInput" class="tag-input" aria-label="태그" placeholder="태그: report, prompt, idea" tabindex="-1" />
             </div>
           </div>
 

@@ -187,6 +187,7 @@ let referenceRenderTimer = null;
 let postSwitchRenderTimer = null;
 let postSwitchRenderFrame = null;
 let splitWorkspaceRenderTimer = null;
+let savedEditorSelection = null;
 let paneScrollSyncing = false;
 let lockedReferenceGuard = null;
 let splitScrollDriftWarned = false;
@@ -1865,6 +1866,30 @@ function hideDocContextMenu() {
   els.docContextMenu.classList.add("hidden");
 }
 
+function closeOpenToolbarMenus(except = null) {
+  document.querySelectorAll("details.menu-wrap[open]").forEach((menu) => {
+    if (menu !== except) menu.removeAttribute("open");
+  });
+}
+
+function closeFloatingUi(exceptMenu = null) {
+  closeOpenToolbarMenus(exceptMenu);
+  hideDocContextMenu();
+}
+
+function initFloatingUiDismiss() {
+  document.addEventListener("pointerdown", (event) => {
+    if (els.docContextMenu.contains(event.target)) return;
+    const openMenu = event.target.closest?.("details.menu-wrap");
+    closeFloatingUi(openMenu || null);
+  });
+  document.addEventListener("toggle", (event) => {
+    const menu = event.target;
+    if (!(menu instanceof HTMLDetailsElement) || !menu.classList.contains("menu-wrap") || !menu.open) return;
+    closeOpenToolbarMenus(menu);
+  }, true);
+}
+
 async function runDocContextAction(action) {
   const doc = documents.find((item) => item.id === finderState.contextDocId);
   if (!doc) return;
@@ -3003,19 +3028,53 @@ function applyBlockStyle(tag) {
   syncRichToDocument();
 }
 
+function getEditorRangeFromSelection() {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return null;
+  const range = selection.getRangeAt(0);
+  if (!els.richEditor.contains(range.commonAncestorContainer)) return null;
+  return range;
+}
+
+function saveEditorSelection() {
+  const range = getEditorRangeFromSelection();
+  if (range) savedEditorSelection = range.cloneRange();
+}
+
+function restoreEditorSelection() {
+  if (!savedEditorSelection) return false;
+  if (!els.richEditor.contains(savedEditorSelection.commonAncestorContainer)) return false;
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(savedEditorSelection.cloneRange());
+  return true;
+}
+
 function applyInlineStyle(property, value) {
+  restoreEditorSelection();
   focusWithoutScroll(els.richEditor);
   const selection = window.getSelection();
-  if (!selection.rangeCount || !els.richEditor.contains(selection.anchorNode)) return;
-  const range = selection.getRangeAt(0);
-  if (range.collapsed) return;
+  const range = getEditorRangeFromSelection();
+  if (!selection.rangeCount || !range) return;
   const span = document.createElement("span");
   span.style[property] = value;
-  span.append(range.extractContents());
-  range.insertNode(span);
+  if (range.collapsed) {
+    const marker = document.createTextNode("\u200b");
+    span.append(marker);
+    range.insertNode(span);
+    range.setStart(marker, 1);
+    range.setEnd(marker, 1);
+  } else {
+    span.append(range.extractContents());
+    range.insertNode(span);
+    range.selectNodeContents(span);
+    range.collapse(false);
+  }
   selection.removeAllRanges();
   selection.addRange(range);
+  savedEditorSelection = range.cloneRange();
   syncRichToDocument();
+  focusWithoutScroll(els.richEditor);
 }
 
 function applyDocumentTheme(theme) {
@@ -3243,6 +3302,10 @@ els.editor.addEventListener("input", () => {
 
 els.richEditor.addEventListener("input", syncRichToDocument);
 els.richEditor.addEventListener("paste", handleRichPaste);
+els.richEditor.addEventListener("keyup", saveEditorSelection);
+els.richEditor.addEventListener("mouseup", saveEditorSelection);
+els.richEditor.addEventListener("focus", saveEditorSelection);
+document.querySelector(".rich-toolbar")?.addEventListener("pointerdown", saveEditorSelection, true);
 
 document.querySelectorAll(".mode-btn").forEach((btn) => {
   btn.addEventListener("click", () => setMode(btn.dataset.mode));
@@ -3403,8 +3466,9 @@ els.wrapToggleBtn.addEventListener("click", () => {
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !els.commandOverlay.classList.contains("hidden")) {
-    closeCommandPalette();
+  if (event.key === "Escape") {
+    closeFloatingUi();
+    if (!els.commandOverlay.classList.contains("hidden")) closeCommandPalette();
   } else if (event.ctrlKey && event.code === "KeyK") {
     event.preventDefault();
     openCommandPalette();
@@ -3431,6 +3495,7 @@ window.TextForgeDocumentSwitchPerf = {
 };
 
 initTheme();
+initFloatingUiDismiss();
 setUiMode(uiMode);
 focusMode = loadFocusModeState();
 updateFocusModeUi();

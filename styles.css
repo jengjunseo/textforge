@@ -759,7 +759,15 @@ a,
   flex: 1;
 }
 
+.title-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+}
+
 .title-input {
+  min-width: 0;
   padding: 7px 10px;
   font-size: 18px;
   font-weight: 750;
@@ -771,6 +779,10 @@ a,
   align-items: center;
   gap: 8px;
   margin-top: 7px;
+}
+
+.hidden-tag-row {
+  display: none;
 }
 
 .star-btn {
