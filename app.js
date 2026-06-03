@@ -188,6 +188,7 @@ let postSwitchRenderTimer = null;
 let postSwitchRenderFrame = null;
 let splitWorkspaceRenderTimer = null;
 let savedEditorSelection = null;
+let pendingTypingStyle = {};
 let paneScrollSyncing = false;
 let lockedReferenceGuard = null;
 let splitScrollDriftWarned = false;
@@ -478,6 +479,61 @@ function stripDisplayOnlyMarkers(root) {
   root.querySelectorAll('[style*="--tf-adapted-color"]').forEach((element) => {
     element.style.removeProperty("--tf-adapted-color");
     if (!element.getAttribute("style")?.trim()) element.removeAttribute("style");
+  });
+}
+
+function styleSignature(element) {
+  return (element.getAttribute("style") || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function hasOnlyStyleAttribute(element) {
+  return [...element.attributes].every((attr) => attr.name.toLowerCase() === "style");
+}
+
+function unwrapElement(element) {
+  element.replaceWith(...element.childNodes);
+}
+
+function cleanupInlineStyleSpans(root) {
+  root.querySelectorAll("[style]").forEach((element) => {
+    if (!element.getAttribute("style")?.trim() || !element.style.length) {
+      element.removeAttribute("style");
+    }
+  });
+  root.querySelectorAll("span").forEach((span) => {
+    if (span.childNodes.length === 1 && span.firstChild?.nodeType === Node.TEXT_NODE) {
+      span.firstChild.textContent = span.firstChild.textContent.replace(/\u200b/g, "");
+    }
+    if (!span.textContent && !span.querySelector("img,br,hr,table")) span.remove();
+  });
+  [...root.querySelectorAll("span")].reverse().forEach((span) => {
+    const child = span.firstElementChild;
+    if (
+      child &&
+      child.tagName === "SPAN" &&
+      span.childNodes.length === 1 &&
+      hasOnlyStyleAttribute(span) &&
+      hasOnlyStyleAttribute(child) &&
+      styleSignature(span) === styleSignature(child)
+    ) {
+      unwrapElement(child);
+    }
+  });
+  root.querySelectorAll("span").forEach((span) => {
+    let next = span.nextSibling;
+    while (
+      next?.nodeType === Node.ELEMENT_NODE &&
+      next.tagName === "SPAN" &&
+      hasOnlyStyleAttribute(span) &&
+      hasOnlyStyleAttribute(next) &&
+      styleSignature(span) === styleSignature(next)
+    ) {
+      span.append(...next.childNodes);
+      const consumed = next;
+      next = next.nextSibling;
+      consumed.remove();
+    }
+    if (!span.getAttribute("style") && !span.attributes.length) unwrapElement(span);
   });
 }
 
@@ -2013,6 +2069,7 @@ function sanitizeRichHtml(html) {
   const template = document.createElement("template");
   template.innerHTML = html;
   stripDisplayOnlyMarkers(template.content);
+  cleanupInlineStyleSpans(template.content);
   template.content.querySelectorAll("script,style,iframe,object,embed").forEach((node) => node.remove());
   template.content.querySelectorAll("*").forEach((node) => {
     [...node.attributes].forEach((attr) => {
@@ -3017,14 +3074,18 @@ function insertHardBreaks() {
 }
 
 function applyFormat(command, value = null) {
+  restoreEditorSelection();
   focusWithoutScroll(els.richEditor);
   document.execCommand(command, false, value);
+  saveEditorSelection();
   syncRichToDocument();
 }
 
 function applyBlockStyle(tag) {
+  restoreEditorSelection();
   focusWithoutScroll(els.richEditor);
   document.execCommand("formatBlock", false, tag);
+  saveEditorSelection();
   syncRichToDocument();
 }
 
@@ -3050,31 +3111,84 @@ function restoreEditorSelection() {
   return true;
 }
 
-function applyInlineStyle(property, value) {
-  restoreEditorSelection();
-  focusWithoutScroll(els.richEditor);
-  const selection = window.getSelection();
-  const range = getEditorRangeFromSelection();
-  if (!selection.rangeCount || !range) return;
+function setPendingTypingStyle(property, value) {
+  if (value) pendingTypingStyle[property] = value;
+  else delete pendingTypingStyle[property];
+}
+
+function hasPendingTypingStyle() {
+  return Object.keys(pendingTypingStyle).length > 0;
+}
+
+function applyStyleMapToSpan(span, styleMap) {
+  Object.entries(styleMap).forEach(([property, value]) => {
+    if (value) span.style[property] = value;
+  });
+}
+
+function applyInlineStyleToSelection(styleMap, range = getEditorRangeFromSelection()) {
+  if (!range || range.collapsed) return false;
   const span = document.createElement("span");
-  span.style[property] = value;
-  if (range.collapsed) {
-    const marker = document.createTextNode("\u200b");
-    span.append(marker);
-    range.insertNode(span);
-    range.setStart(marker, 1);
-    range.setEnd(marker, 1);
-  } else {
-    span.append(range.extractContents());
-    range.insertNode(span);
-    range.selectNodeContents(span);
-    range.collapse(false);
-  }
+  applyStyleMapToSpan(span, styleMap);
+  span.append(range.extractContents());
+  range.insertNode(span);
+  range.selectNodeContents(span);
+  const selection = window.getSelection();
   selection.removeAllRanges();
   selection.addRange(range);
   savedEditorSelection = range.cloneRange();
+  return true;
+}
+
+function insertStyledTextAtSelection(text, styleMap) {
+  const range = getEditorRangeFromSelection();
+  if (!range) return false;
+  if (!text) return false;
+  const span = document.createElement("span");
+  applyStyleMapToSpan(span, styleMap);
+  span.textContent = text;
+  range.deleteContents();
+  range.insertNode(span);
+  range.setStartAfter(span);
+  range.setEndAfter(span);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  savedEditorSelection = range.cloneRange();
+  return true;
+}
+
+function applyPendingTypingStyleOnBeforeInput(event) {
+  if (!hasPendingTypingStyle() || event.isComposing || event.inputType !== "insertText" || !event.data) return;
+  restoreEditorSelection();
+  focusWithoutScroll(els.richEditor);
+  if (!insertStyledTextAtSelection(event.data, pendingTypingStyle)) return;
+  event.preventDefault();
   syncRichToDocument();
   focusWithoutScroll(els.richEditor);
+}
+
+function applyInlineStyle(property, value) {
+  restoreEditorSelection();
+  focusWithoutScroll(els.richEditor);
+  const range = getEditorRangeFromSelection();
+  if (!range) return;
+  const styleMap = { [property]: value };
+  if (range.collapsed) {
+    setPendingTypingStyle(property, value);
+    savedEditorSelection = range.cloneRange();
+    focusWithoutScroll(els.richEditor);
+    return;
+  }
+  setPendingTypingStyle(property, value);
+  if (applyInlineStyleToSelection(styleMap, range)) {
+    syncRichToDocument();
+    focusWithoutScroll(els.richEditor);
+  }
+}
+
+function applyFontSize(value) {
+  applyInlineStyle("fontSize", value);
 }
 
 function applyDocumentTheme(theme) {
@@ -3301,6 +3415,7 @@ els.editor.addEventListener("input", () => {
 });
 
 els.richEditor.addEventListener("input", syncRichToDocument);
+els.richEditor.addEventListener("beforeinput", applyPendingTypingStyleOnBeforeInput);
 els.richEditor.addEventListener("paste", handleRichPaste);
 els.richEditor.addEventListener("keyup", saveEditorSelection);
 els.richEditor.addEventListener("mouseup", saveEditorSelection);
@@ -3386,7 +3501,7 @@ document.querySelectorAll(".format-btn[data-command]").forEach((btn) => {
 });
 els.styleSelect.addEventListener("change", () => applyBlockStyle(els.styleSelect.value));
 els.fontSelect.addEventListener("change", () => applyInlineStyle("fontFamily", els.fontSelect.value));
-els.sizeSelect.addEventListener("change", () => applyInlineStyle("fontSize", els.sizeSelect.value));
+els.sizeSelect.addEventListener("change", () => applyFontSize(els.sizeSelect.value));
 els.colorInput.addEventListener("input", () => applyInlineStyle("color", els.colorInput.value));
 els.bgInput.addEventListener("input", () => applyInlineStyle("backgroundColor", els.bgInput.value));
 els.themeSelect.addEventListener("change", () => {
