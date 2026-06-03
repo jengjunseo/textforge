@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#202328" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="TextForge" />
+    <title>TextForge MVP</title>
+    <script>
+      (() => {
+        const stored = localStorage.getItem("textforge.theme") || "system";
+        const system = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.dataset.theme = stored === "dark" || stored === "light" ? stored : system;
+        document.documentElement.dataset.themeMode = stored;
+      })();
+    </script>
+    <link rel="manifest" href="manifest.json" />
+    <link rel="icon" href="TextForge.ico" sizes="any" />
+    <link rel="icon" href="textforge-icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="문서">
+        <div class="brand">
+          <div>
+            <p class="eyebrow">Local Text Workbench</p>
+            <h1>TextForge</h1>
+          </div>
+          <button id="newDocBtn" class="icon-btn" title="새 메모" aria-label="새 메모">+</button>
+        </div>
+
+        <label class="search-box">
+          <span>검색</span>
+          <input id="searchInput" type="search" placeholder="문서 전체 검색" autocomplete="off" />
+        </label>
+
+        <div id="docList" class="doc-list" role="list"></div>
+        <button id="finderOpenBtn" class="library-btn" type="button">문서함</button>
+      </aside>
+
+      <main id="finderView" class="finder-view hidden" aria-label="TextForge Library">
+        <header class="finder-topbar">
+          <div>
+            <p class="eyebrow">Document Library</p>
+            <h2>TextForge Library</h2>
+          </div>
+          <label class="finder-search">
+            <span>검색</span>
+            <input id="finderSearchInput" type="search" placeholder="제목, 태그, 미리보기, 유형 검색" autocomplete="off" />
+          </label>
+          <select id="finderSortSelect" class="finder-control" aria-label="문서 정렬">
+            <option value="updated">최근 수정순</option>
+            <option value="created">최근 생성순</option>
+            <option value="title">제목순</option>
+            <option value="favorite">즐겨찾기 우선</option>
+            <option value="chars">글자 수 많은 순</option>
+          </select>
+          <div class="finder-actions">
+            <button id="finderGridBtn" class="finder-action active" type="button">격자</button>
+            <button id="finderListBtn" class="finder-action" type="button">목록</button>
+            <button id="finderSelectBtn" class="finder-action" type="button">선택</button>
+            <button id="forgeSnapshotBtn" class="finder-action" type="button">Forge Snapshot</button>
+            <button id="finderNewDocBtn" class="finder-action primary" type="button">새 문서</button>
+            <button id="finderNewFolderBtn" class="finder-action" type="button">새 폴더</button>
+            <button id="finderCloseBtn" class="finder-action" type="button">편집기로</button>
+          </div>
+        </header>
+
+        <div class="finder-body">
+          <aside class="finder-sidebar" aria-label="문서함 필터">
+            <button class="finder-nav active" data-filter="all" type="button">전체 문서 <span id="finderAllCount">0</span></button>
+            <button class="finder-nav" data-filter="recent" type="button">최근 문서</button>
+            <button class="finder-nav" data-filter="favorites" type="button">즐겨찾기</button>
+            <button class="finder-nav" data-filter="prompts" type="button">프롬프트 보관함</button>
+            <div class="finder-nav-section">
+              <strong>태그</strong>
+              <div id="finderTagList" class="finder-mini-list"></div>
+            </div>
+            <div class="finder-nav-section">
+              <strong>폴더</strong>
+              <div id="finderFolderList" class="finder-mini-list"></div>
+            </div>
+            <button class="finder-nav danger" data-filter="trash" type="button">휴지통</button>
+          </aside>
+
+          <section class="finder-main">
+            <div id="finderCrumbs" class="finder-crumbs">전체 문서</div>
+            <div id="finderBulkBar" class="finder-bulk-bar hidden">
+              <strong id="finderSelectionCount">0개 선택됨</strong>
+              <select id="finderBulkFolderSelect" class="finder-control" aria-label="선택한 문서를 폴더로 이동"></select>
+              <button id="finderBulkMoveBtn" class="finder-action" type="button">이동</button>
+              <button id="finderBulkTrashBtn" class="finder-action danger-action" type="button">삭제</button>
+              <button id="finderBulkCancelBtn" class="finder-action" type="button">취소</button>
+            </div>
+            <div id="finderGrid" class="finder-grid" aria-live="polite"></div>
+            <div class="finder-pager">
+              <button id="finderPrevBtn" class="finder-action" type="button">&lt;</button>
+              <span id="finderPageText">1 / 1</span>
+              <button id="finderNextBtn" class="finder-action" type="button">&gt;</button>
+            </div>
+          </section>
+        </div>
+      </main>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div class="doc-title-wrap">
+            <input id="titleInput" class="title-input" aria-label="문서 제목" />
+            <div class="meta-row">
+              <button id="favoriteBtn" class="star-btn" title="즐겨찾기" aria-label="즐겨찾기">☆</button>
+              <input id="tagInput" class="tag-input" aria-label="태그" placeholder="태그: report, prompt, idea" />
+              <p id="saveState" class="save-state">저장됨</p>
+            </div>
+          </div>
+
+          <div class="toolbar" aria-label="편집 도구">
+            <label class="quiet-select-label">보기
+              <select id="viewModeSelect" class="format-select command-select">
+                <option value="rich">쓰기</option>
+                <option value="source">원문</option>
+                <option value="clean">미리보기</option>
+                <option value="split">분할</option>
+              </select>
+            </label>
+            <details class="menu-wrap split-menu">
+              <summary class="tool-btn">분할</summary>
+              <div class="menu-popover">
+                <button id="splitSingleBtn" class="tool-btn" type="button">단일 보기</button>
+                <button id="splitVerticalBtn" class="tool-btn" type="button">좌우 2분할</button>
+                <button id="splitHorizontalBtn" class="tool-btn" type="button">상하 2분할</button>
+                <button id="splitDuplicateBtn" class="tool-btn" type="button">현재 문서 참고창</button>
+                <label class="quiet-select-label split-doc-picker">다른 문서
+                  <select id="splitOpenDocSelect" class="format-select"></select>
+                </label>
+                <button id="splitSyncBtn" class="tool-btn" type="button">스크롤 동기화 끄기</button>
+              </div>
+            </details>
+            <label class="quiet-select-label">작업
+              <select id="workModeSelect" class="format-select command-select">
+                <option value="modern">기본</option>
+                <option value="plain">일반 텍스트</option>
+                <option value="rich">서식 문서</option>
+                <option value="markdown">Markdown</option>
+                <option value="board">게시판</option>
+                <option value="tidy">정리</option>
+                <option value="system">시스템</option>
+              </select>
+            </label>
+            <div class="segmented legacy-mode-buttons" role="tablist" aria-label="View mode">
+              <button class="mode-btn active" data-mode="rich" role="tab">쓰기</button>
+              <button class="mode-btn" data-mode="source" role="tab">원문</button>
+              <button class="mode-btn" data-mode="clean" role="tab">미리보기</button>
+              <button class="mode-btn" data-mode="split" role="tab">분할</button>
+            </div>
+            <select id="themeSelect" class="format-select" aria-label="문서 테마">
+              <option value="modern">기본</option>
+              <option value="report">보고서</option>
+              <option value="board">게시글</option>
+              <option value="essay">에세이</option>
+              <option value="code">코드</option>
+            </select>
+            <select id="appThemeSelect" class="format-select app-theme-select" aria-label="앱 테마">
+              <option value="system">시스템</option>
+              <option value="light">라이트</option>
+              <option value="dark">다크</option>
+            </select>
+            <details class="menu-wrap">
+              <summary class="tool-btn">복사</summary>
+              <div class="menu-popover">
+                <button id="copyPlainBtn" class="tool-btn" title="Markdown 제거 복사">Plain Copy</button>
+                <button id="copyRichBtn" class="tool-btn" title="서식 유지 복사">Rich Copy</button>
+                <button id="copyMarkdownBtn" class="tool-btn" title="Markdown 복사">Markdown Copy</button>
+                <button id="copyBoardBtn" class="tool-btn" title="디시/게시판용 복사">Board Copy</button>
+              </div>
+            </details>
+            <button id="inspectorToggleBtn" class="tool-btn" type="button">Inspector</button>
+            <details class="menu-wrap">
+              <summary class="tool-btn">더보기</summary>
+              <div class="menu-popover">
+                <button id="cleanOutputBtn" class="tool-btn" title="AI 출력 정리">AI 출력 정리</button>
+                <button id="commandBtn" class="tool-btn" title="명령 팔레트">명령 팔레트</button>
+                <button id="focusModeBtn" class="tool-btn" type="button">집중 모드</button>
+                <button id="topForgeSnapshotBtn" class="tool-btn" type="button">Forge Snapshot</button>
+                <button id="diagnosticsOpenBtn" class="tool-btn" type="button">진단 / 벤치마크</button>
+                <button id="topRecoverBtn" class="tool-btn" type="button">세션 복구</button>
+                <button id="topLogModeBtn" class="tool-btn" type="button">로그 모드</button>
+              </div>
+            </details>
+          </div>
+        </header>
+
+        <section id="guardBanner" class="guard-banner hidden" aria-live="polite">
+          <strong>긴 줄 보호</strong>
+          <span id="guardText"></span>
+          <button id="wrapToggleBtn" class="mini-btn">줄바꿈 끄기</button>
+          <button id="breakLineBtn" class="mini-btn">자동 줄나눔</button>
+        </section>
+
+        <div class="content-area">
+          <section id="editorGrid" class="editor-grid rich-mode">
+            <div class="pane editor-pane">
+              <div class="pane-head">
+                <span id="editorPaneLabel">리치 문서</span>
+                <span id="statsText"></span>
+              </div>
+              <div class="rich-toolbar" aria-label="서식 도구">
+                <div class="tool-group">
+                  <select id="styleSelect" class="format-select style-picker" aria-label="스타일">
+                    <option value="P">본문</option>
+                    <option value="H1">제목 1</option>
+                    <option value="H2">제목 2</option>
+                    <option value="H3">제목 3</option>
+                    <option value="BLOCKQUOTE">인용</option>
+                    <option value="PRE">코드</option>
+                  </select>
+                  <select id="fontSelect" class="format-select font-picker" aria-label="글꼴">
+                    <option value="Pretendard, Inter, sans-serif">Pretendard</option>
+                    <option value="'Noto Sans KR', sans-serif">Noto Sans KR</option>
+                    <option value="'Nanum Gothic', sans-serif">Nanum Gothic</option>
+                    <option value="'Nanum Myeongjo', serif">Nanum Myeongjo</option>
+                    <option value="'Gowun Dodum', sans-serif">Gowun Dodum</option>
+                    <option value="'JetBrains Mono', Consolas, monospace">JetBrains Mono</option>
+                  </select>
+                  <select id="sizeSelect" class="format-select size-picker" aria-label="글자 크기">
+                    <option value="14px">14</option>
+                    <option value="16px" selected>16</option>
+                    <option value="18px">18</option>
+                    <option value="22px">22</option>
+                    <option value="28px">28</option>
+                  </select>
+                </div>
+                <div class="tool-group">
+                  <button class="format-btn text-strong" data-command="bold" title="굵게">B</button>
+                  <button class="format-btn text-italic" data-command="italic" title="기울임">I</button>
+                  <button class="format-btn text-underline" data-command="underline" title="밑줄">U</button>
+                  <button class="format-btn text-strike" data-command="strikeThrough" title="취소선">S</button>
+                  <label class="swatch-btn" title="글자색"><input id="colorInput" class="color-input" type="color" value="#17212b" /><span>A</span></label>
+                  <label class="swatch-btn bg-swatch" title="배경색"><input id="bgInput" class="color-input" type="color" value="#fff4a8" /><span></span></label>
+                </div>
+                <div class="tool-group">
+                  <button class="format-btn" data-command="justifyLeft" title="왼쪽 정렬">☰</button>
+                  <button class="format-btn" data-command="justifyCenter" title="가운데 정렬">≡</button>
+                  <button class="format-btn" data-command="justifyRight" title="오른쪽 정렬">☷</button>
+                  <button class="format-btn" data-command="insertUnorderedList" title="목록">•</button>
+                  <button class="format-btn" data-command="insertOrderedList" title="번호 목록">1.</button>
+                </div>
+                <div class="tool-group">
+                  <button id="linkBtn" class="format-btn icon-text" title="링크">⌕</button>
+                  <details class="menu-wrap insert-menu">
+                    <summary class="format-btn">삽입</summary>
+                    <div class="menu-popover">
+                      <button id="imageBtn" class="format-btn icon-text" title="이미지">이미지</button>
+                      <button id="tableBtn" class="format-btn icon-text" title="표">표</button>
+                      <button id="hrBtn" class="format-btn icon-text" title="구분선">구분선</button>
+                      <button id="spoilerBtn" class="format-btn spoiler-tool" title="스포일러">스포일러</button>
+                    </div>
+                  </details>
+                </div>
+              </div>
+              <div id="richEditor" class="rich-editor theme-modern" contenteditable="true" spellcheck="true"></div>
+              <textarea id="editor" spellcheck="false" wrap="soft"></textarea>
+            </div>
+
+            <div class="pane preview-pane">
+              <div class="pane-head">
+                <span>정리 미리보기</span>
+                <span id="copyState"></span>
+              </div>
+              <article id="preview" class="preview"></article>
+            </div>
+
+            <div id="referencePane" class="pane workspace-pane hidden" data-pane-id="reference">
+              <div class="pane-head workspace-pane-head">
+                <span id="referencePaneTitle">참고창</span>
+                <div class="pane-actions">
+                  <select id="referencePaneMode" class="format-select mini-select" aria-label="참고창 모드">
+                    <option value="readonly">Readonly</option>
+                    <option value="preview">Preview</option>
+                    <option value="source">Source</option>
+                    <option value="clean">Clean</option>
+                  </select>
+                  <button id="referenceScrollLockBtn" class="mini-btn" type="button">Lock</button>
+                  <button id="referenceSyncBtn" class="mini-btn" type="button">Sync</button>
+                  <select id="referenceDocSelect" class="format-select mini-select" aria-label="참고 문서"></select>
+                  <button id="referenceCloseBtn" class="mini-btn" type="button" aria-label="참고창 닫기">×</button>
+                </div>
+              </div>
+              <article id="referencePaneBody" class="preview reference-body"></article>
+            </div>
+          </section>
+
+          <aside class="inspector collapsed" aria-label="문서 도구">
+            <div class="inspector-tabs">
+              <button class="inspector-tab active" data-inspector-tab="toc" type="button">목차</button>
+              <button class="inspector-tab" data-inspector-tab="history" type="button">히스토리</button>
+              <button class="inspector-tab" data-inspector-tab="prompt" type="button">프롬프트</button>
+              <button class="inspector-tab" data-inspector-tab="system" type="button">시스템</button>
+            </div>
+            <section class="tool-panel inspector-panel active" data-inspector-panel="toc">
+              <div class="panel-head">
+                <strong>목차</strong>
+                <button id="foldPreviewBtn" class="mini-btn">접기</button>
+              </div>
+              <div id="tocList" class="toc-list"></div>
+            </section>
+
+            <section class="tool-panel inspector-panel" data-inspector-panel="history">
+              <div class="panel-head">
+                <strong>히스토리</strong>
+                <button id="snapshotBtn" class="mini-btn">스냅샷</button>
+              </div>
+              <div id="historyList" class="history-list"></div>
+            </section>
+
+            <section class="tool-panel inspector-panel" data-inspector-panel="prompt">
+              <div class="panel-head">
+                <strong>프롬프트 보관함</strong>
+                <button id="copyPromptBtn" class="mini-btn">복사</button>
+              </div>
+              <select id="promptSelect" class="prompt-select" aria-label="프롬프트 선택"></select>
+              <div class="prompt-actions">
+                <button id="insertPromptBtn">삽입</button>
+                <button id="savePromptBtn">현재 문서 저장</button>
+              </div>
+            </section>
+
+            <section class="tool-panel inspector-panel" data-inspector-panel="info">
+              <div class="panel-head">
+                <strong>정보</strong>
+              </div>
+              <div id="docInfoList" class="system-list"></div>
+            </section>
+
+            <section class="tool-panel inspector-panel system-panel" data-inspector-panel="system">
+              <div class="panel-head">
+                <strong>시스템</strong>
+                <button id="logModeBtn" class="mini-btn">로그</button>
+              </div>
+              <div id="systemList" class="system-list"></div>
+            </section>
+          </aside>
+        </div>
+
+        <footer class="actionbar">
+          <details class="menu-wrap action-menu">
+            <summary>내보내기</summary>
+            <div class="menu-popover menu-popover-up">
+              <button id="exportTxtBtn">TXT</button>
+              <button id="exportMdBtn">Markdown</button>
+              <button id="exportHtmlBtn">HTML</button>
+              <button id="exportPdfBtn">PDF</button>
+              <button id="exportDocBtn">DOC</button>
+              <button id="exportEpubBtn">EPUB</button>
+              <button id="exportCardBtn">PNG Card</button>
+              <button id="footerForgeSnapshotBtn" type="button">Forge Snapshot</button>
+            </div>
+          </details>
+          <details class="menu-wrap action-menu">
+            <summary>복구</summary>
+            <div class="menu-popover menu-popover-up">
+              <button id="recoverBtn">세션 복구</button>
+              <button id="footerHistoryBtn" type="button">히스토리 열기</button>
+              <button id="footerSnapshotBtn" type="button">스냅샷 저장</button>
+            </div>
+          </details>
+          <span id="sessionText">로컬 자동저장 활성</span>
+        </footer>
+      </main>
+    </div>
+
+    <div id="commandOverlay" class="command-overlay hidden" role="dialog" aria-label="명령 팔레트">
+      <div class="command-box">
+        <input id="commandInput" type="search" placeholder="명령 또는 문서 검색" autocomplete="off" />
+        <div id="commandList" class="command-list"></div>
+      </div>
+    </div>
+
+    <div id="docContextMenu" class="doc-context-menu hidden" role="menu">
+      <button data-action="open" type="button">열기</button>
+      <button data-action="open-right" type="button">오른쪽에 열기</button>
+      <button data-action="rename" type="button">이름 바꾸기</button>
+      <button data-action="duplicate" type="button">복제</button>
+      <button data-action="favorite" type="button">즐겨찾기 전환</button>
+      <button data-action="tags" type="button">태그 편집</button>
+      <button data-action="plain" type="button">일반 텍스트 복사</button>
+      <button data-action="markdown" type="button">Markdown 복사</button>
+      <button data-action="board" type="button">게시판용 복사</button>
+      <button data-action="html" type="button">HTML 내보내기</button>
+      <button data-action="trash" type="button">휴지통으로 이동</button>
+    </div>
+
+    <div id="forgeSnapshotDialog" class="snapshot-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="forgeSnapshotTitle">
+      <div class="snapshot-panel">
+        <div class="snapshot-panel-head">
+          <div>
+            <p class="eyebrow">Forge Snapshot</p>
+            <h2 id="forgeSnapshotTitle">Forge Snapshot 만들기</h2>
+            <p>현재 TextForge 문서함을 읽기 전용 HTML 아카이브로 내보냅니다. 스마트폰이나 다른 기기에서 열람, 검색, 복사할 수 있습니다.</p>
+          </div>
+          <button id="forgeSnapshotCloseBtn" class="icon-btn" type="button" aria-label="닫기">×</button>
+        </div>
+
+        <div class="snapshot-options">
+          <section>
+            <h3>포함 범위</h3>
+            <label><input type="radio" name="snapshotScope" value="all" checked /> 전체 문서</label>
+            <label><input type="radio" name="snapshotScope" value="favorites" /> 즐겨찾기만</label>
+            <label><input type="radio" name="snapshotScope" value="current-folder" /> 현재 폴더</label>
+            <label><input type="radio" name="snapshotScope" value="recent" /> 최근 수정 문서</label>
+            <label><input type="radio" name="snapshotScope" value="specific-folder" /> 특정 폴더</label>
+            <select id="snapshotFolderSelect"></select>
+            <label><input type="radio" name="snapshotScope" value="specific-tag" /> 특정 태그</label>
+            <select id="snapshotTagSelect"></select>
+            <label><input type="radio" name="snapshotScope" value="selected" /> 선택한 문서만</label>
+          </section>
+
+          <section>
+            <h3>제외 옵션</h3>
+            <label><input id="snapshotExcludeTrash" type="checkbox" checked /> 휴지통 문서 제외</label>
+            <label><input id="snapshotExcludePrompts" type="checkbox" /> Prompt Vault 문서 제외</label>
+            <label><input id="snapshotExcludeEmpty" type="checkbox" checked /> 빈 문서 제외</label>
+            <label><input id="snapshotExcludeImages" type="checkbox" /> 이미지 제외</label>
+            <label><input id="snapshotExcludeHistory" type="checkbox" checked /> 히스토리 제외</label>
+          </section>
+
+          <section>
+            <h3>출력 옵션</h3>
+            <label>테마
+              <select id="snapshotThemeSelect">
+                <option value="system">System</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </label>
+            <label>파일명
+              <input id="snapshotFilenameInput" type="text" />
+            </label>
+            <label><input id="snapshotMobileUi" type="checkbox" checked /> 모바일 최적화 UI 포함</label>
+            <label><input id="snapshotDesktopUi" type="checkbox" checked /> PC 레이아웃 지원</label>
+          </section>
+        </div>
+
+        <p class="snapshot-warning">Forge Snapshot은 선택된 문서 내용을 하나의 HTML 파일에 포함합니다. 민감한 문서가 들어가지 않았는지 확인하세요.</p>
+        <div id="snapshotSummary" class="snapshot-summary">미리 계산을 누르면 포함될 문서 수와 예상 크기를 확인합니다.</div>
+
+        <div class="snapshot-actions">
+          <button id="snapshotEstimateBtn" type="button">미리 계산</button>
+          <button id="snapshotGenerateBtn" class="primary-action" type="button">Snapshot 생성</button>
+          <button id="snapshotCancelBtn" type="button">취소</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="diagnosticsDialog" class="snapshot-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="diagnosticsTitle">
+      <div class="snapshot-panel diagnostics-panel">
+        <div class="snapshot-panel-head">
+          <div>
+            <p class="eyebrow">Diagnostics</p>
+            <h2 id="diagnosticsTitle">TextForge 진단 / 벤치마크</h2>
+            <p>현재 앱 상태를 기준으로 안정성, 지연 시간, 처리량, 저장소 사용량, Snapshot 생성 비용을 측정합니다. 더미 데이터는 memory-only로 처리됩니다.</p>
+          </div>
+          <button id="diagnosticsCloseBtn" class="icon-btn" type="button" aria-label="닫기">×</button>
+        </div>
+        <div class="diagnostics-actions">
+          <button id="diagQuickBtn" type="button">빠른 벤치마크</button>
+          <button id="diagFullBtn" type="button">전체 벤치마크</button>
+          <button id="diagReliabilityBtn" type="button">안정성 테스트</button>
+          <button id="diagRealLibraryBtn" type="button">실제 문서함</button>
+          <button id="diagMttrBtn" type="button">MTTR 복구</button>
+          <button id="diagSnapshotBtn" type="button">Snapshot 벤치마크</button>
+          <button id="diagStressBtn" class="danger-action" type="button">Stress 테스트</button>
+          <button id="diagExportBtn" type="button">JSON 내보내기</button>
+        </div>
+        <div id="diagnosticsSummary" class="snapshot-summary">아직 실행된 진단 결과가 없습니다.</div>
+        <pre id="diagnosticsOutput" class="diagnostics-output"></pre>
+      </div>
+    </div>
+
+    <script src="forge-snapshot.js"></script>
+    <script src="textforge-diagnostics.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

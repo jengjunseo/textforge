@@ -1,0 +1,27 @@
+# Runtime/editor noise
+.DS_Store
+Thumbs.db
+
+# Local browser profiles and temporary benchmark runs
+.chrome-*/
+.tmp-edge-*/
+
+# Local recovery/backups
+recovery-backup-*/
+
+# Generated benchmark and diagnostic result artifacts
+diagnostics-*-result.json
+split-*-result.json
+split-reference-scroll-drift-*-result.json
+split-scroll-*-result.json
+
+# Dependency/build output, if added later
+node_modules/
+dist/
+build/
+coverage/
+
+# Local environment files
+.env
+.env.*
+
