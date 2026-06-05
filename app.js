@@ -189,6 +189,8 @@ let postSwitchRenderFrame = null;
 let splitWorkspaceRenderTimer = null;
 let savedEditorSelection = null;
 let pendingTypingStyle = {};
+let formatDebugEnabled = localStorage.getItem("textforge.formatDebug") === "true";
+let formatDebugBuffer = [];
 let paneScrollSyncing = false;
 let lockedReferenceGuard = null;
 let splitScrollDriftWarned = false;
@@ -441,6 +443,89 @@ function showLastDocumentSwitchTrace() {
   els.sessionText.textContent = `Last switch: ${trace.totalToNextFrameMs}ms to next frame, ${trace.totalToRenderActiveEndMs}ms renderActive`;
 }
 
+function shortHash(value = "") {
+  let hash = 0;
+  const text = String(value);
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function describeNode(node) {
+  if (!node) return null;
+  if (node.nodeType === Node.TEXT_NODE) return "#text";
+  return node.nodeName?.toLowerCase?.() || String(node.nodeName || "node");
+}
+
+function getSelectionDebugSummary() {
+  const selection = window.getSelection();
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  return {
+    rangeCount: selection?.rangeCount || 0,
+    isSelectionInsideEditor: Boolean(range && els.richEditor.contains(range.commonAncestorContainer)),
+    anchorNode: describeNode(selection?.anchorNode),
+    focusNode: describeNode(selection?.focusNode),
+    selectedTextLength: selection?.toString?.().length || 0,
+  };
+}
+
+function summarizeHtmlForFormatDebug(html = "") {
+  const text = String(html);
+  return {
+    length: text.length,
+    hash: shortHash(text),
+    containsFontSize: /font-size\s*:/i.test(text),
+    containsFontFamily: /font-family\s*:/i.test(text),
+    containsColor: /(?:^|[;"])color\s*:/i.test(text),
+    containsBackgroundColor: /background-color\s*:/i.test(text),
+    styledSpanCount: (text.match(/<span\b[^>]*style=/gi) || []).length,
+    styleAttributeCount: (text.match(/\sstyle=/gi) || []).length,
+  };
+}
+
+function formatDebugLog(label, detail = {}) {
+  if (!formatDebugEnabled && window.TEXTFORGE_FORMAT_DEBUG !== true) return;
+  if (window.TEXTFORGE_FORMAT_DEBUG === true) formatDebugEnabled = true;
+  const entry = {
+    at: new Date().toISOString(),
+    label,
+    ...detail,
+  };
+  formatDebugBuffer.push(entry);
+  if (formatDebugBuffer.length > 300) formatDebugBuffer = formatDebugBuffer.slice(-300);
+  console.log(`[format-debug] ${label}`, entry);
+}
+
+function setFormatDebugEnabled(enabled) {
+  formatDebugEnabled = Boolean(enabled);
+  localStorage.setItem("textforge.formatDebug", formatDebugEnabled ? "true" : "false");
+  window.TEXTFORGE_FORMAT_DEBUG = formatDebugEnabled;
+  els.sessionText.textContent = formatDebugEnabled ? "Format debug on" : "Format debug off";
+}
+
+function showFormatDebugLog() {
+  console.table(formatDebugBuffer);
+  els.sessionText.textContent = `Format debug log: ${formatDebugBuffer.length} entries`;
+}
+
+async function copyFormatDebugLog() {
+  const text = JSON.stringify(formatDebugBuffer, null, 2);
+  await navigator.clipboard.writeText(text);
+  els.sessionText.textContent = `Copied ${formatDebugBuffer.length} format debug entries`;
+}
+
+function formatControlDebugStart(control, eventType, value) {
+  formatDebugLog("event start", {
+    control,
+    eventType,
+    value,
+    activeElement: document.activeElement?.id || document.activeElement?.className || document.activeElement?.tagName,
+    selection: getSelectionDebugSummary(),
+    savedSelectionExists: Boolean(savedEditorSelection),
+  });
+}
+
 function scheduleContentColorAdaptation(delay = 300) {
   clearTimeout(colorAdaptTimer);
   colorAdaptTimer = setTimeout(() => {
@@ -675,6 +760,13 @@ const COMMANDS = [
   { id: "export-epub", title: "EPUB 내보내기", hint: "문서를 XHTML로 패키징", run: () => exportFile("epub") },
   { id: "new-doc", title: "새 문서", hint: "Instant Draft", run: createAndFocusDocument },
 ];
+
+COMMANDS.splice(COMMANDS.findIndex((item) => item.id === "split-single"), 0,
+  { id: "format-debug-on", title: "Format Debug On", hint: "Enable rich text formatting debug logs", labOnly: true, run: () => setFormatDebugEnabled(true) },
+  { id: "format-debug-off", title: "Format Debug Off", hint: "Disable rich text formatting debug logs", labOnly: true, run: () => setFormatDebugEnabled(false) },
+  { id: "format-debug-show", title: "Show Format Debug Log", hint: "Print recent formatting debug entries to console", labOnly: true, run: showFormatDebugLog },
+  { id: "format-debug-copy", title: "Copy Format Debug Log", hint: "Copy recent formatting debug entries as JSON", labOnly: true, run: copyFormatDebugLog },
+);
 
 if (!documents.length) {
   const first = createDocument(richSampleText());
@@ -1045,11 +1137,23 @@ function setActivePane(paneId) {
 
 function focusWithoutScroll(element) {
   if (!element) return;
+  const beforeSelection = getSelectionDebugSummary();
+  const beforeActive = document.activeElement?.id || document.activeElement?.className || document.activeElement?.tagName;
   try {
     element.focus({ preventScroll: true });
   } catch {
     element.focus();
   }
+  const afterSelection = getSelectionDebugSummary();
+  formatDebugLog("focusWithoutScroll", {
+    target: element.id || element.className || element.tagName,
+    before: { activeElement: beforeActive, selection: beforeSelection },
+    after: {
+      activeElement: document.activeElement?.id || document.activeElement?.className || document.activeElement?.tagName,
+      selection: afterSelection,
+    },
+    selectionChanged: JSON.stringify(beforeSelection) !== JSON.stringify(afterSelection),
+  });
 }
 
 function openDocumentInPane(documentId, paneId = "main", options = {}) {
@@ -2042,10 +2146,18 @@ function currentPlainText() {
 
 function syncRichToDocument() {
   const guard = beginLockedReferenceGuard("rich-input", 900);
+  const beforeEditorHtml = els.richEditor.innerHTML;
+  const beforeDocHtml = activeDoc()?.contentHtml || "";
   const html = sanitizeRichHtml(els.richEditor.innerHTML);
   updateActive((doc) => {
     doc.contentHtml = html;
     doc.content = htmlToMarkdown(html);
+  });
+  formatDebugLog("syncRichToDocument", {
+    beforeEditorHTML: summarizeHtmlForFormatDebug(beforeEditorHtml),
+    beforeDocHTML: summarizeHtmlForFormatDebug(beforeDocHtml),
+    afterDocHTML: summarizeHtmlForFormatDebug(activeDoc()?.contentHtml || ""),
+    docHTMLChanged: beforeDocHtml !== activeDoc()?.contentHtml,
   });
   els.editor.value = activeDoc().content;
   renderPreview();
@@ -2067,6 +2179,7 @@ function syncSourceToDocument() {
 
 function sanitizeRichHtml(html) {
   const template = document.createElement("template");
+  const beforeSummary = summarizeHtmlForFormatDebug(html);
   template.innerHTML = html;
   stripDisplayOnlyMarkers(template.content);
   cleanupInlineStyleSpans(template.content);
@@ -2078,7 +2191,14 @@ function sanitizeRichHtml(html) {
       if (attr.name.toLowerCase() === "contenteditable") node.removeAttribute(attr.name);
     });
   });
-  return template.innerHTML || "<p></p>";
+  const result = template.innerHTML || "<p></p>";
+  const afterSummary = summarizeHtmlForFormatDebug(result);
+  formatDebugLog("sanitizeRichHtml", {
+    before: beforeSummary,
+    after: afterSummary,
+    removedStyleCount: Math.max(0, beforeSummary.styleAttributeCount - afterSummary.styleAttributeCount),
+  });
+  return result;
 }
 
 function searchScore(doc, query) {
@@ -3074,10 +3194,25 @@ function insertHardBreaks() {
 }
 
 function applyFormat(command, value = null) {
+  formatDebugLog("applyFormat:start", {
+    command,
+    value,
+    activeElement: document.activeElement?.id || document.activeElement?.className || document.activeElement?.tagName,
+    selection: getSelectionDebugSummary(),
+    savedSelectionExists: Boolean(savedEditorSelection),
+  });
+  const beforeHtml = els.richEditor.innerHTML;
   restoreEditorSelection();
   focusWithoutScroll(els.richEditor);
   document.execCommand(command, false, value);
   saveEditorSelection();
+  formatDebugLog("applyFormat:after-dom", {
+    command,
+    value,
+    editorHTMLChanged: beforeHtml !== els.richEditor.innerHTML,
+    changedLengthDelta: els.richEditor.innerHTML.length - beforeHtml.length,
+    afterEditorHTML: summarizeHtmlForFormatDebug(els.richEditor.innerHTML),
+  });
   syncRichToDocument();
 }
 
@@ -3100,20 +3235,45 @@ function getEditorRangeFromSelection() {
 function saveEditorSelection() {
   const range = getEditorRangeFromSelection();
   if (range) savedEditorSelection = range.cloneRange();
+  formatDebugLog("saveEditorSelection", {
+    activeElement: document.activeElement?.id || document.activeElement?.className || document.activeElement?.tagName,
+    selection: getSelectionDebugSummary(),
+    saved: Boolean(range),
+    savedSelectionExists: Boolean(savedEditorSelection),
+  });
 }
 
 function restoreEditorSelection() {
-  if (!savedEditorSelection) return false;
-  if (!els.richEditor.contains(savedEditorSelection.commonAncestorContainer)) return false;
+  formatDebugLog("restoreEditorSelection:before", {
+    selection: getSelectionDebugSummary(),
+    savedSelectionExists: Boolean(savedEditorSelection),
+  });
+  if (!savedEditorSelection) {
+    formatDebugLog("restoreEditorSelection:after", { restored: false, reason: "missing-saved-selection", selection: getSelectionDebugSummary() });
+    return false;
+  }
+  if (!els.richEditor.contains(savedEditorSelection.commonAncestorContainer)) {
+    formatDebugLog("restoreEditorSelection:after", { restored: false, reason: "saved-selection-outside-editor", selection: getSelectionDebugSummary() });
+    return false;
+  }
   const selection = window.getSelection();
   selection.removeAllRanges();
   selection.addRange(savedEditorSelection.cloneRange());
+  formatDebugLog("restoreEditorSelection:after", {
+    restored: true,
+    selection: getSelectionDebugSummary(),
+  });
   return true;
 }
 
 function setPendingTypingStyle(property, value) {
   if (value) pendingTypingStyle[property] = value;
   else delete pendingTypingStyle[property];
+  formatDebugLog("pendingTypingStyle:set", {
+    styleName: property,
+    value,
+    pendingTypingStyle: { ...pendingTypingStyle },
+  });
 }
 
 function hasPendingTypingStyle() {
@@ -3159,35 +3319,98 @@ function insertStyledTextAtSelection(text, styleMap) {
 }
 
 function applyPendingTypingStyleOnBeforeInput(event) {
+  formatDebugLog("beforeinput", {
+    inputType: event.inputType,
+    hasData: Boolean(event.data),
+    dataLength: event.data?.length || 0,
+    isComposing: event.isComposing,
+    pendingTypingStyle: { ...pendingTypingStyle },
+    selection: getSelectionDebugSummary(),
+  });
   if (!hasPendingTypingStyle() || event.isComposing || event.inputType !== "insertText" || !event.data) return;
   restoreEditorSelection();
   focusWithoutScroll(els.richEditor);
-  if (!insertStyledTextAtSelection(event.data, pendingTypingStyle)) return;
+  const applied = insertStyledTextAtSelection(event.data, pendingTypingStyle);
+  formatDebugLog("pendingTypingStyle:applied", {
+    success: applied,
+    pendingTypingStyle: { ...pendingTypingStyle },
+    selection: getSelectionDebugSummary(),
+  });
+  if (!applied) return;
   event.preventDefault();
   syncRichToDocument();
   focusWithoutScroll(els.richEditor);
 }
 
 function applyInlineStyle(property, value) {
+  const beforeHtml = els.richEditor.innerHTML;
+  formatDebugLog("applyInlineStyle:start", {
+    styleName: property,
+    value,
+    activeElement: document.activeElement?.id || document.activeElement?.className || document.activeElement?.tagName,
+    selection: getSelectionDebugSummary(),
+    savedSelectionExists: Boolean(savedEditorSelection),
+    beforeEditorHTML: summarizeHtmlForFormatDebug(beforeHtml),
+  });
   restoreEditorSelection();
+  formatDebugLog("applyInlineStyle:after-restore", {
+    selection: getSelectionDebugSummary(),
+    savedSelectionExists: Boolean(savedEditorSelection),
+  });
   focusWithoutScroll(els.richEditor);
   const range = getEditorRangeFromSelection();
-  if (!range) return;
+  if (!range) {
+    formatDebugLog("applyInlineStyle:after-dom", {
+      styleName: property,
+      value,
+      path: "no-range",
+      editorHTMLChanged: false,
+      changedLengthDelta: 0,
+      createdStyledSpanCount: 0,
+      afterEditorHTML: summarizeHtmlForFormatDebug(els.richEditor.innerHTML),
+    });
+    return;
+  }
   const styleMap = { [property]: value };
   if (range.collapsed) {
     setPendingTypingStyle(property, value);
     savedEditorSelection = range.cloneRange();
     focusWithoutScroll(els.richEditor);
+    formatDebugLog("applyInlineStyle:after-dom", {
+      styleName: property,
+      value,
+      path: "pendingTypingStyle",
+      editorHTMLChanged: beforeHtml !== els.richEditor.innerHTML,
+      changedLengthDelta: els.richEditor.innerHTML.length - beforeHtml.length,
+      createdStyledSpanCount: summarizeHtmlForFormatDebug(els.richEditor.innerHTML).styledSpanCount - summarizeHtmlForFormatDebug(beforeHtml).styledSpanCount,
+      afterEditorHTML: summarizeHtmlForFormatDebug(els.richEditor.innerHTML),
+    });
     return;
   }
   setPendingTypingStyle(property, value);
   if (applyInlineStyleToSelection(styleMap, range)) {
+    const afterHtml = els.richEditor.innerHTML;
+    formatDebugLog("applyInlineStyle:after-dom", {
+      styleName: property,
+      value,
+      path: "selection",
+      editorHTMLChanged: beforeHtml !== afterHtml,
+      changedLengthDelta: afterHtml.length - beforeHtml.length,
+      createdStyledSpanCount: summarizeHtmlForFormatDebug(afterHtml).styledSpanCount - summarizeHtmlForFormatDebug(beforeHtml).styledSpanCount,
+      afterEditorHTML: summarizeHtmlForFormatDebug(afterHtml),
+    });
     syncRichToDocument();
     focusWithoutScroll(els.richEditor);
   }
 }
 
 function applyFontSize(value) {
+  const range = getEditorRangeFromSelection();
+  formatDebugLog("applyFontSize", {
+    value,
+    path: range?.collapsed ? "pendingTypingStyle" : range ? "selection" : "no-range",
+    selection: getSelectionDebugSummary(),
+  });
   applyInlineStyle("fontSize", value);
 }
 
@@ -3209,6 +3432,12 @@ function insertHtmlAtCursor(html) {
 }
 
 function handleRichPaste(event) {
+  formatDebugLog("paste", {
+    itemCount: event.clipboardData?.items?.length || 0,
+    types: [...(event.clipboardData?.types || [])],
+    pendingTypingStyle: { ...pendingTypingStyle },
+    selection: getSelectionDebugSummary(),
+  });
   const items = [...(event.clipboardData?.items || [])];
   const image = items.find((item) => item.type.startsWith("image/"));
   if (!image) return;
@@ -3414,9 +3643,19 @@ els.editor.addEventListener("input", () => {
   syncSourceToDocument();
 });
 
-els.richEditor.addEventListener("input", syncRichToDocument);
+els.richEditor.addEventListener("input", (event) => {
+  formatDebugLog("input", {
+    inputType: event.inputType,
+    isComposing: event.isComposing,
+    pendingTypingStyle: { ...pendingTypingStyle },
+    editorHTML: summarizeHtmlForFormatDebug(els.richEditor.innerHTML),
+  });
+  syncRichToDocument();
+});
 els.richEditor.addEventListener("beforeinput", applyPendingTypingStyleOnBeforeInput);
 els.richEditor.addEventListener("paste", handleRichPaste);
+els.richEditor.addEventListener("compositionstart", () => formatDebugLog("compositionstart", { selection: getSelectionDebugSummary() }));
+els.richEditor.addEventListener("compositionend", () => formatDebugLog("compositionend", { selection: getSelectionDebugSummary(), pendingTypingStyle: { ...pendingTypingStyle } }));
 els.richEditor.addEventListener("keyup", saveEditorSelection);
 els.richEditor.addEventListener("mouseup", saveEditorSelection);
 els.richEditor.addEventListener("focus", saveEditorSelection);
@@ -3497,13 +3736,31 @@ els.footerHistoryBtn?.addEventListener("click", () => setInspectorOpen(true, "hi
 els.footerSnapshotBtn?.addEventListener("click", saveManualSnapshot);
 
 document.querySelectorAll(".format-btn[data-command]").forEach((btn) => {
-  btn.addEventListener("click", () => applyFormat(btn.dataset.command));
+  btn.addEventListener("click", (event) => {
+    formatControlDebugStart(btn.dataset.command, event.type, btn.dataset.command);
+    applyFormat(btn.dataset.command);
+  });
 });
-els.styleSelect.addEventListener("change", () => applyBlockStyle(els.styleSelect.value));
-els.fontSelect.addEventListener("change", () => applyInlineStyle("fontFamily", els.fontSelect.value));
-els.sizeSelect.addEventListener("change", () => applyFontSize(els.sizeSelect.value));
-els.colorInput.addEventListener("input", () => applyInlineStyle("color", els.colorInput.value));
-els.bgInput.addEventListener("input", () => applyInlineStyle("backgroundColor", els.bgInput.value));
+els.styleSelect.addEventListener("change", (event) => {
+  formatControlDebugStart("styleSelect", event.type, els.styleSelect.value);
+  applyBlockStyle(els.styleSelect.value);
+});
+els.fontSelect.addEventListener("change", (event) => {
+  formatControlDebugStart("fontSelect", event.type, els.fontSelect.value);
+  applyInlineStyle("fontFamily", els.fontSelect.value);
+});
+els.sizeSelect.addEventListener("change", (event) => {
+  formatControlDebugStart("sizeSelect", event.type, els.sizeSelect.value);
+  applyFontSize(els.sizeSelect.value);
+});
+els.colorInput.addEventListener("input", (event) => {
+  formatControlDebugStart("colorInput", event.type, els.colorInput.value);
+  applyInlineStyle("color", els.colorInput.value);
+});
+els.bgInput.addEventListener("input", (event) => {
+  formatControlDebugStart("bgInput", event.type, els.bgInput.value);
+  applyInlineStyle("backgroundColor", els.bgInput.value);
+});
 els.themeSelect.addEventListener("change", () => {
   updateActive((doc) => {
     doc.theme = els.themeSelect.value;
@@ -3607,6 +3864,19 @@ window.TextForgeDocumentSwitchPerf = {
   getLastDocumentSwitchTrace,
   exportDocumentSwitchBenchmarkJson,
   showLastDocumentSwitchTrace,
+};
+
+window.TEXTFORGE_FORMAT_DEBUG = formatDebugEnabled;
+window.TextForgeFormatDebug = {
+  enable: () => setFormatDebugEnabled(true),
+  disable: () => setFormatDebugEnabled(false),
+  show: showFormatDebugLog,
+  copy: copyFormatDebugLog,
+  getEntries: () => [...formatDebugBuffer],
+  clear: () => {
+    formatDebugBuffer = [];
+    els.sessionText.textContent = "Format debug log cleared";
+  },
 };
 
 initTheme();
