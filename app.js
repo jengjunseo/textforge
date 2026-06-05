@@ -3321,8 +3321,117 @@ function applyStyleMapToSpan(span, styleMap) {
   });
 }
 
+function countInlineStyleProperty(root, property) {
+  return [...root.querySelectorAll("[style]")].filter((element) => Boolean(element.style[property])).length;
+}
+
+function getSelectedTextNodes(range) {
+  const nodes = [];
+  const walker = document.createTreeWalker(els.richEditor, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!node.nodeValue) return NodeFilter.FILTER_REJECT;
+      try {
+        return range.intersectsNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      } catch {
+        return NodeFilter.FILTER_REJECT;
+      }
+    },
+  });
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  return nodes;
+}
+
+function getSelectedTextNodeSegment(range, node) {
+  let start = node === range.startContainer ? range.startOffset : 0;
+  let end = node === range.endContainer ? range.endOffset : node.nodeValue.length;
+  start = Math.max(0, Math.min(start, node.nodeValue.length));
+  end = Math.max(start, Math.min(end, node.nodeValue.length));
+  return { node, start, end };
+}
+
+function rangeContainsBlock(range) {
+  const fragment = range.cloneContents();
+  return Boolean(fragment.querySelector?.("p,div,h1,h2,h3,h4,h5,h6,li,blockquote,pre,td,th,table,ul,ol"));
+}
+
+function isWholeEditorSelection(range) {
+  const selectionText = range.toString().replace(/\s+/g, "");
+  const editorText = els.richEditor.innerText.replace(/\s+/g, "");
+  return Boolean(selectionText && selectionText === editorText);
+}
+
+function isComplexRange(range) {
+  if (!range || range.collapsed) return false;
+  if (isWholeEditorSelection(range) || rangeContainsBlock(range)) return true;
+  return getSelectedTextNodes(range).length > 1;
+}
+
+function wrapOrUpdateTextNodeSegment(segment, styleMap) {
+  const { node, start, end } = segment;
+  if (!node.isConnected || start >= end) return null;
+  let target = node;
+  if (end < target.nodeValue.length) target.splitText(end);
+  if (start > 0) target = target.splitText(start);
+  const parent = target.parentElement;
+  if (parent?.tagName === "SPAN" && parent.childNodes.length === 1 && parent.firstChild === target) {
+    applyStyleMapToSpan(parent, styleMap);
+    return parent;
+  }
+  const span = document.createElement("span");
+  applyStyleMapToSpan(span, styleMap);
+  target.replaceWith(span);
+  span.append(target);
+  return span;
+}
+
+function cleanupNestedInlineStyles(root, styleKeys) {
+  root.querySelectorAll("span[style]").forEach((span) => {
+    const child = span.firstElementChild;
+    if (
+      child?.tagName === "SPAN" &&
+      span.childNodes.length === 1 &&
+      hasOnlyStyleAttribute(span) &&
+      hasOnlyStyleAttribute(child)
+    ) {
+      styleKeys.forEach((property) => {
+        if (child.style[property] && span.style[property]) span.style[property] = "";
+      });
+      if (!span.getAttribute("style")?.trim()) unwrapElement(span);
+    }
+  });
+  cleanupInlineStyleSpans(root);
+}
+
+function applyStyleToTextNodesInRange(range, styleMap) {
+  const segments = getSelectedTextNodes(range)
+    .map((node) => getSelectedTextNodeSegment(range, node))
+    .filter((segment) => segment.start < segment.end);
+  const styledNodes = [];
+  segments.forEach((segment) => {
+    const styled = wrapOrUpdateTextNodeSegment(segment, styleMap);
+    if (styled) styledNodes.push(styled);
+  });
+  if (!styledNodes.length) return false;
+  cleanupNestedInlineStyles(els.richEditor, Object.keys(styleMap));
+  const connectedStyledNodes = styledNodes.filter((node) => node.isConnected);
+  if (!connectedStyledNodes.length) return true;
+  const nextRange = document.createRange();
+  nextRange.setStartBefore(connectedStyledNodes[0]);
+  nextRange.setEndAfter(connectedStyledNodes[connectedStyledNodes.length - 1]);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(nextRange);
+  savedEditorSelection = nextRange.cloneRange();
+  return true;
+}
+
+function applyInlineStyleToComplexSelection(styleMap, range) {
+  return applyStyleToTextNodesInRange(range, styleMap);
+}
+
 function applyInlineStyleToSelection(styleMap, range = getEditorRangeFromSelection()) {
   if (!range || range.collapsed) return false;
+  if (isComplexRange(range)) return applyInlineStyleToComplexSelection(styleMap, range);
   const span = document.createElement("span");
   applyStyleMapToSpan(span, styleMap);
   span.append(range.extractContents());
@@ -3423,15 +3532,17 @@ function applyInlineStyle(property, value) {
     return;
   }
   setPendingTypingStyle(property, value);
+  const complexSelection = isComplexRange(range);
   if (applyInlineStyleToSelection(styleMap, range)) {
     const afterHtml = els.richEditor.innerHTML;
     formatDebugLog("applyInlineStyle:after-dom", {
       styleName: property,
       value,
-      path: "selection",
+      path: complexSelection ? "complex-selection" : "selection",
       editorHTMLChanged: beforeHtml !== afterHtml,
       changedLengthDelta: afterHtml.length - beforeHtml.length,
       createdStyledSpanCount: summarizeHtmlForFormatDebug(afterHtml).styledSpanCount - summarizeHtmlForFormatDebug(beforeHtml).styledSpanCount,
+      selectedStylePropertyCount: countInlineStyleProperty(els.richEditor, property),
       afterEditorHTML: summarizeHtmlForFormatDebug(afterHtml),
     });
     syncRichToDocument();
