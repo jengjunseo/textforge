@@ -198,6 +198,8 @@ let activeDocumentSwitchTrace = null;
 let lastDocumentSwitchTrace = null;
 let documentSwitchBenchmarkResult = null;
 
+installFormatDebugApi();
+
 const systemThemeQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
 function getStoredTheme() {
@@ -497,22 +499,55 @@ function formatDebugLog(label, detail = {}) {
   console.log(`[format-debug] ${label}`, entry);
 }
 
+function setSessionText(text) {
+  if (els.sessionText) els.sessionText.textContent = text;
+}
+
 function setFormatDebugEnabled(enabled) {
   formatDebugEnabled = Boolean(enabled);
   localStorage.setItem("textforge.formatDebug", formatDebugEnabled ? "true" : "false");
   window.TEXTFORGE_FORMAT_DEBUG = formatDebugEnabled;
-  els.sessionText.textContent = formatDebugEnabled ? "Format debug on" : "Format debug off";
+  setSessionText(formatDebugEnabled ? "Format debug on" : "Format debug off");
+  return formatDebugEnabled;
 }
 
 function showFormatDebugLog() {
-  console.table(formatDebugBuffer);
-  els.sessionText.textContent = `Format debug log: ${formatDebugBuffer.length} entries`;
+  if (console.table) console.table(formatDebugBuffer);
+  else console.log("[format-debug] entries", formatDebugBuffer);
+  setSessionText(`Format debug log: ${formatDebugBuffer.length} entries`);
+  return [...formatDebugBuffer];
 }
 
 async function copyFormatDebugLog() {
   const text = JSON.stringify(formatDebugBuffer, null, 2);
-  await navigator.clipboard.writeText(text);
-  els.sessionText.textContent = `Copied ${formatDebugBuffer.length} format debug entries`;
+  try {
+    await navigator.clipboard.writeText(text);
+    setSessionText(`Copied ${formatDebugBuffer.length} format debug entries`);
+  } catch (error) {
+    console.log("[format-debug] copy fallback", text);
+    console.warn("[format-debug] clipboard copy failed", error);
+    setSessionText("Format debug copy failed; printed to console");
+  }
+  return text;
+}
+
+function clearFormatDebugLog() {
+  formatDebugBuffer = [];
+  setSessionText("Format debug log cleared");
+  return [];
+}
+
+function installFormatDebugApi() {
+  window.TEXTFORGE_FORMAT_DEBUG = formatDebugEnabled;
+  window.TextForgeFormatDebug = {
+    enable: () => setFormatDebugEnabled(true),
+    disable: () => setFormatDebugEnabled(false),
+    show: showFormatDebugLog,
+    copy: copyFormatDebugLog,
+    getEntries: () => [...formatDebugBuffer],
+    clear: clearFormatDebugLog,
+  };
+  return window.TextForgeFormatDebug;
 }
 
 function formatControlDebugStart(control, eventType, value) {
@@ -3864,19 +3899,6 @@ window.TextForgeDocumentSwitchPerf = {
   getLastDocumentSwitchTrace,
   exportDocumentSwitchBenchmarkJson,
   showLastDocumentSwitchTrace,
-};
-
-window.TEXTFORGE_FORMAT_DEBUG = formatDebugEnabled;
-window.TextForgeFormatDebug = {
-  enable: () => setFormatDebugEnabled(true),
-  disable: () => setFormatDebugEnabled(false),
-  show: showFormatDebugLog,
-  copy: copyFormatDebugLog,
-  getEntries: () => [...formatDebugBuffer],
-  clear: () => {
-    formatDebugBuffer = [];
-    els.sessionText.textContent = "Format debug log cleared";
-  },
 };
 
 initTheme();
