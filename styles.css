@@ -1513,7 +1513,7 @@ textarea {
   padding: 34px clamp(22px, 5vw, 76px);
   outline: none;
   line-height: 1.72;
-  font-size: 16px;
+  font-size: 18px;
   background: var(--bg-editor-page);
   color: var(--text-primary);
 }

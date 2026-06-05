@@ -71,6 +71,7 @@ const els = {
   sizeSelect: document.querySelector("#sizeSelect"),
   colorInput: document.querySelector("#colorInput"),
   bgInput: document.querySelector("#bgInput"),
+  clearFormatBtn: document.querySelector("#clearFormatBtn"),
   linkBtn: document.querySelector("#linkBtn"),
   imageBtn: document.querySelector("#imageBtn"),
   tableBtn: document.querySelector("#tableBtn"),
@@ -795,6 +796,11 @@ const COMMANDS = [
   { id: "export-epub", title: "EPUB 내보내기", hint: "문서를 XHTML로 패키징", run: () => exportFile("epub") },
   { id: "new-doc", title: "새 문서", hint: "Instant Draft", run: createAndFocusDocument },
 ];
+
+COMMANDS.splice(COMMANDS.findIndex((item) => item.id === "clean-paste") + 1, 0,
+  { id: "clear-formatting", title: "Clear Format", hint: "Reset selected text to TextForge default 18px body style", run: clearFormattingToDefault },
+  { id: "default-formatting", title: "Default Formatting", hint: "Apply default 18px body style to the selection", run: clearFormattingToDefault },
+);
 
 COMMANDS.splice(COMMANDS.findIndex((item) => item.id === "split-single"), 0,
   { id: "format-debug-on", title: "Format Debug On", hint: "Enable rich text formatting debug logs", labOnly: true, run: () => setFormatDebugEnabled(true) },
@@ -3321,6 +3327,46 @@ function applyStyleMapToSpan(span, styleMap) {
   });
 }
 
+function defaultTextStyleMap() {
+  return {
+    fontSize: "18px",
+    fontFamily: "Pretendard, Inter, system-ui, sans-serif",
+    color: "var(--text-primary)",
+    fontWeight: "400",
+    fontStyle: "normal",
+    textDecoration: "none",
+    textDecorationLine: "none",
+  };
+}
+
+function resetPendingTypingStyleToDefault() {
+  pendingTypingStyle = {
+    fontSize: "18px",
+    fontFamily: "Pretendard, Inter, system-ui, sans-serif",
+    color: "var(--text-primary)",
+  };
+  formatDebugLog("pendingTypingStyle:reset-default", {
+    pendingTypingStyle: { ...pendingTypingStyle },
+  });
+}
+
+function stripInlineFormatting(element) {
+  if (!element?.style) return;
+  [
+    "fontSize",
+    "fontFamily",
+    "color",
+    "backgroundColor",
+    "fontWeight",
+    "fontStyle",
+    "textDecoration",
+    "textDecorationLine",
+  ].forEach((property) => element.style[property] = "");
+  element.removeAttribute("data-dark-color-fix");
+  element.style.removeProperty("--tf-adapted-color");
+  if (!element.getAttribute("style")?.trim()) element.removeAttribute("style");
+}
+
 function countInlineStyleProperty(root, property) {
   return [...root.querySelectorAll("[style]")].filter((element) => Boolean(element.style[property])).length;
 }
@@ -3442,6 +3488,61 @@ function applyInlineStyleToSelection(styleMap, range = getEditorRangeFromSelecti
   selection.addRange(range);
   savedEditorSelection = range.cloneRange();
   return true;
+}
+
+function cleanupFormattingSpans(root) {
+  root.querySelectorAll("[data-dark-color-fix]").forEach((element) => element.removeAttribute("data-dark-color-fix"));
+  root.querySelectorAll('[style*="--tf-adapted-color"]').forEach((element) => {
+    element.style.removeProperty("--tf-adapted-color");
+  });
+  root.querySelectorAll("span").forEach((span) => {
+    if (!span.getAttribute("style")?.trim() && !span.attributes.length) unwrapElement(span);
+  });
+  cleanupInlineStyleSpans(root);
+}
+
+function applyDefaultTextStyleToRange(range) {
+  return applyInlineStyleToSelection(defaultTextStyleMap(), range);
+}
+
+function clearFormattingInSelection(range) {
+  if (!range || range.collapsed) return false;
+  document.execCommand("removeFormat", false, null);
+  const currentRange = getEditorRangeFromSelection() || range;
+  const applied = applyDefaultTextStyleToRange(currentRange);
+  cleanupFormattingSpans(els.richEditor);
+  return applied;
+}
+
+function clearFormattingInComplexSelection(range) {
+  return clearFormattingInSelection(range);
+}
+
+function clearFormattingToDefault() {
+  restoreEditorSelection();
+  focusWithoutScroll(els.richEditor);
+  const range = getEditorRangeFromSelection();
+  formatDebugLog("clearFormattingToDefault:start", {
+    selection: getSelectionDebugSummary(),
+    path: range?.collapsed ? "pendingTypingStyle" : range ? (isComplexRange(range) ? "complex-selection" : "selection") : "no-range",
+  });
+  if (!range) return;
+  if (range.collapsed) {
+    resetPendingTypingStyleToDefault();
+    savedEditorSelection = range.cloneRange();
+    focusWithoutScroll(els.richEditor);
+    return;
+  }
+  const beforeHtml = els.richEditor.innerHTML;
+  const applied = isComplexRange(range) ? clearFormattingInComplexSelection(range) : clearFormattingInSelection(range);
+  if (applied) {
+    formatDebugLog("clearFormattingToDefault:after-dom", {
+      editorHTMLChanged: beforeHtml !== els.richEditor.innerHTML,
+      afterEditorHTML: summarizeHtmlForFormatDebug(els.richEditor.innerHTML),
+    });
+    syncRichToDocument();
+    focusWithoutScroll(els.richEditor);
+  }
 }
 
 function insertStyledTextAtSelection(text, styleMap) {
@@ -3906,6 +4007,10 @@ els.colorInput.addEventListener("input", (event) => {
 els.bgInput.addEventListener("input", (event) => {
   formatControlDebugStart("bgInput", event.type, els.bgInput.value);
   applyInlineStyle("backgroundColor", els.bgInput.value);
+});
+els.clearFormatBtn?.addEventListener("click", (event) => {
+  formatControlDebugStart("clearFormatBtn", event.type, "default-18px");
+  clearFormattingToDefault();
 });
 els.themeSelect.addEventListener("change", () => {
   updateActive((doc) => {
