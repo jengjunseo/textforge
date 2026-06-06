@@ -192,6 +192,12 @@ let savedEditorSelection = null;
 let pendingTypingStyle = {};
 let formatDebugEnabled = localStorage.getItem("textforge.formatDebug") === "true";
 let formatDebugBuffer = [];
+let typingDebugEnabled = localStorage.getItem("textforge.typingDebug") === "true";
+let typingDebugBuffer = [];
+let activeTypingTrace = null;
+let typingTraceSequence = 0;
+let typingLongTaskObserver = null;
+let typingLongTaskEntries = [];
 let paneScrollSyncing = false;
 let lockedReferenceGuard = null;
 let splitScrollDriftWarned = false;
@@ -200,6 +206,7 @@ let lastDocumentSwitchTrace = null;
 let documentSwitchBenchmarkResult = null;
 
 installFormatDebugApi();
+installTypingDebugApi();
 
 const systemThemeQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
@@ -562,6 +569,281 @@ function formatControlDebugStart(control, eventType, value) {
   });
 }
 
+function getTypingEnvironmentSummary() {
+  return {
+    mode: document.documentElement.dataset.mode || "rich",
+    focusMode,
+    splitOn: splitWorkspace.layout !== "single",
+    previewVisible: isPreviewPaneVisible(),
+    inspectorOpen,
+    inspectorTab,
+    theme: document.documentElement.dataset.theme,
+  };
+}
+
+function getTypingDocumentSummary() {
+  const doc = activeDoc();
+  const html = els.richEditor?.innerHTML || "";
+  return {
+    docId: doc?.id || null,
+    htmlLength: html.length,
+    htmlHash: shortHash(html),
+    plainLength: doc?.plainText?.length || htmlToPlain(html).length,
+    domNodeCount: els.richEditor ? els.richEditor.querySelectorAll("*").length : 0,
+  };
+}
+
+function observeTypingLongTasks() {
+  if (typingLongTaskObserver || !("PerformanceObserver" in window)) return;
+  try {
+    typingLongTaskObserver = new PerformanceObserver((list) => {
+      typingLongTaskEntries.push(...list.getEntries().map((entry) => ({
+        startTime: entry.startTime,
+        duration: entry.duration,
+      })));
+      if (typingLongTaskEntries.length > 200) typingLongTaskEntries = typingLongTaskEntries.slice(-200);
+    });
+    typingLongTaskObserver.observe({ entryTypes: ["longtask"] });
+  } catch {
+    typingLongTaskObserver = "unsupported";
+  }
+}
+
+function setTypingDebugEnabled(enabled) {
+  typingDebugEnabled = Boolean(enabled);
+  localStorage.setItem("textforge.typingDebug", typingDebugEnabled ? "true" : "false");
+  window.TEXTFORGE_TYPING_DEBUG = typingDebugEnabled;
+  if (typingDebugEnabled) observeTypingLongTasks();
+  setSessionText(typingDebugEnabled ? "Typing debug on" : "Typing debug off");
+  return typingDebugEnabled;
+}
+
+function createTypingTrace(event, source = "input") {
+  if (!typingDebugEnabled && window.TEXTFORGE_TYPING_DEBUG !== true) return null;
+  if (window.TEXTFORGE_TYPING_DEBUG === true) typingDebugEnabled = true;
+  observeTypingLongTasks();
+  const now = performance.now();
+  const docSummary = getTypingDocumentSummary();
+  activeTypingTrace = {
+    traceId: `typing-${Date.now()}-${++typingTraceSequence}`,
+    at: new Date().toISOString(),
+    source,
+    inputType: event?.inputType || event?.type || source,
+    dataLength: event?.data?.length || 0,
+    isComposing: Boolean(event?.isComposing),
+    ...getTypingEnvironmentSummary(),
+    ...docSummary,
+    steps: [],
+    startMs: now,
+    inputStartMs: source === "input" ? now : null,
+    lastMarkMs: now,
+    totalInputHandlerMs: 0,
+    toNextFrameMs: null,
+    toSecondFrameMs: null,
+    longTaskCount: 0,
+    maxLongTaskMs: 0,
+    totalLongTaskMs: 0,
+  };
+  return activeTypingTrace;
+}
+
+function markTypingTrace(label, detail = {}) {
+  if (!activeTypingTrace || (!typingDebugEnabled && window.TEXTFORGE_TYPING_DEBUG !== true)) return;
+  const now = performance.now();
+  activeTypingTrace.steps.push({
+    label,
+    atMs: Number((now - activeTypingTrace.startMs).toFixed(3)),
+    sincePreviousMs: Number((now - activeTypingTrace.lastMarkMs).toFixed(3)),
+    ...detail,
+  });
+  activeTypingTrace.lastMarkMs = now;
+}
+
+function finishTypingTrace() {
+  const trace = activeTypingTrace;
+  if (!trace) return;
+  const inputEndMs = performance.now();
+  trace.totalInputHandlerMs = trace.inputStartMs ? Number((inputEndMs - trace.inputStartMs).toFixed(3)) : 0;
+  markTypingTrace("typing:input:end");
+  if (activeTypingTrace === trace) activeTypingTrace = null;
+  const appendFrameMark = (label) => {
+    const now = performance.now();
+    trace.steps.push({
+      label,
+      atMs: Number((now - trace.startMs).toFixed(3)),
+      sincePreviousMs: Number((now - trace.lastMarkMs).toFixed(3)),
+    });
+    trace.lastMarkMs = now;
+  };
+  requestAnimationFrame(() => {
+    trace.toNextFrameMs = trace.inputStartMs ? Number((performance.now() - trace.inputStartMs).toFixed(3)) : null;
+    appendFrameMark("typing:next-frame");
+    requestAnimationFrame(() => {
+      trace.toSecondFrameMs = trace.inputStartMs ? Number((performance.now() - trace.inputStartMs).toFixed(3)) : null;
+      appendFrameMark("typing:second-frame");
+      const traceEnd = performance.now();
+      const longTasks = typingLongTaskEntries.filter((entry) => entry.startTime >= trace.startMs && entry.startTime <= traceEnd);
+      trace.longTaskCount = longTasks.length;
+      trace.maxLongTaskMs = longTasks.length ? Math.max(...longTasks.map((entry) => entry.duration)) : 0;
+      trace.totalLongTaskMs = longTasks.reduce((sum, entry) => sum + entry.duration, 0);
+      trace.steps = trace.steps.map((step) => ({ ...step }));
+      delete trace.startMs;
+      delete trace.inputStartMs;
+      delete trace.lastMarkMs;
+      typingDebugBuffer.push(trace);
+      if (typingDebugBuffer.length > 300) typingDebugBuffer = typingDebugBuffer.slice(-300);
+    });
+  });
+}
+
+function recordTypingEvent(label, event) {
+  if (!typingDebugEnabled && window.TEXTFORGE_TYPING_DEBUG !== true) return;
+  const entry = {
+    traceId: `event-${Date.now()}-${++typingTraceSequence}`,
+    at: new Date().toISOString(),
+    source: label,
+    inputType: event?.inputType || event?.type || label,
+    dataLength: event?.data?.length || 0,
+    isComposing: Boolean(event?.isComposing),
+    ...getTypingEnvironmentSummary(),
+    ...getTypingDocumentSummary(),
+    steps: [{ label, atMs: 0, sincePreviousMs: 0 }],
+    totalInputHandlerMs: 0,
+    toNextFrameMs: null,
+    toSecondFrameMs: null,
+    longTaskCount: 0,
+    maxLongTaskMs: 0,
+    totalLongTaskMs: 0,
+  };
+  typingDebugBuffer.push(entry);
+  if (typingDebugBuffer.length > 300) typingDebugBuffer = typingDebugBuffer.slice(-300);
+}
+
+function percentile(values, p) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * p));
+  return Number(sorted[index].toFixed(3));
+}
+
+function statsFor(values) {
+  const clean = values.filter((value) => Number.isFinite(value));
+  if (!clean.length) return { avg: 0, p50: 0, p95: 0, max: 0 };
+  return {
+    avg: Number((clean.reduce((sum, value) => sum + value, 0) / clean.length).toFixed(3)),
+    p50: percentile(clean, 0.5),
+    p95: percentile(clean, 0.95),
+    max: Number(Math.max(...clean).toFixed(3)),
+  };
+}
+
+function collectPairedStepDurations(steps, startLabel, endLabel) {
+  const starts = [];
+  const durations = [];
+  steps.forEach((step) => {
+    if (step.label === startLabel) {
+      starts.push(step.atMs);
+    } else if (step.label === endLabel && starts.length) {
+      const startMs = starts.shift();
+      durations.push(Number((step.atMs - startMs).toFixed(3)));
+    }
+  });
+  return durations;
+}
+
+function typingLatencySummary() {
+  const traces = typingDebugBuffer.filter((trace) => trace.steps?.some((step) => step.label === "typing:input:end"));
+  const stepDurations = new Map();
+  const stagePairs = [
+    ["syncRichToDocument", "syncRichToDocument:start", "syncRichToDocument:end"],
+    ["sanitizeRichHtml", "sanitizeRichHtml:start", "sanitizeRichHtml:end"],
+    ["htmlToMarkdown", "before htmlToMarkdown", "after htmlToMarkdown"],
+    ["refreshDocDerived", "before refreshDocDerived", "after refreshDocDerived"],
+    ["htmlToPlain", "before htmlToPlain", "after htmlToPlain"],
+    ["renderPreview", "before renderPreview", "after renderPreview"],
+    ["updateStats", "before updateStats", "after updateStats"],
+    ["persistSoon", "before persistSoon", "after persistSoon"],
+    ["maybeAutoSnapshot", "before maybeAutoSnapshot", "after maybeAutoSnapshot"],
+  ];
+  const stageDurations = new Map(stagePairs.map(([name]) => [name, []]));
+  traces.forEach((trace) => {
+    trace.steps.forEach((step) => {
+      const list = stepDurations.get(step.label) || [];
+      list.push(step.sincePreviousMs || 0);
+      stepDurations.set(step.label, list);
+    });
+    stagePairs.forEach(([name, startLabel, endLabel]) => {
+      stageDurations.get(name).push(...collectPairedStepDurations(trace.steps, startLabel, endLabel));
+    });
+  });
+  const stepStats = [...stepDurations.entries()].map(([label, values]) => ({
+    label,
+    ...statsFor(values),
+  })).sort((a, b) => b.p95 - a.p95);
+  const stageStats = [...stageDurations.entries()].map(([label, values]) => ({
+    label,
+    ...statsFor(values),
+  })).sort((a, b) => b.p95 - a.p95);
+  const summary = {
+    samples: traces.length,
+    inputHandler: statsFor(traces.map((trace) => trace.totalInputHandlerMs)),
+    inputToNextFrame: statsFor(traces.map((trace) => trace.toNextFrameMs)),
+    inputToSecondFrame: statsFor(traces.map((trace) => trace.toSecondFrameMs)),
+    longTaskCount: traces.reduce((sum, trace) => sum + (trace.longTaskCount || 0), 0),
+    maxLongTaskMs: Number(Math.max(0, ...traces.map((trace) => trace.maxLongTaskMs || 0)).toFixed(3)),
+    totalLongTaskMs: Number(traces.reduce((sum, trace) => sum + (trace.totalLongTaskMs || 0), 0).toFixed(3)),
+    stepStats,
+    topSlowSteps: stepStats.slice(0, 10),
+    stageStats,
+    topSlowStages: stageStats.slice(0, 10),
+    environment: getTypingEnvironmentSummary(),
+    document: getTypingDocumentSummary(),
+  };
+  console.log("[typing-debug] summary", summary);
+  setSessionText(`Typing debug: ${summary.samples} samples, input p95 ${summary.inputHandler.p95}ms`);
+  return summary;
+}
+
+function showTypingDebugLog() {
+  console.log("[typing-debug] entries", typingDebugBuffer);
+  setSessionText(`Typing debug log: ${typingDebugBuffer.length} entries`);
+  return [...typingDebugBuffer];
+}
+
+async function copyTypingDebugLog() {
+  const text = JSON.stringify({ entries: typingDebugBuffer, summary: typingLatencySummary() }, null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+    setSessionText(`Copied ${typingDebugBuffer.length} typing debug entries`);
+  } catch (error) {
+    console.log("[typing-debug] copy fallback", text);
+    console.warn("[typing-debug] clipboard copy failed", error);
+    setSessionText("Typing debug copy failed; printed to console");
+  }
+  return text;
+}
+
+function installTypingDebugApi() {
+  window.TEXTFORGE_TYPING_DEBUG = typingDebugEnabled;
+  window.TextForgeTypingDebug = {
+    enable: () => setTypingDebugEnabled(true),
+    disable: () => setTypingDebugEnabled(false),
+    clear: () => {
+      typingDebugBuffer = [];
+      typingLongTaskEntries = [];
+      activeTypingTrace = null;
+      setSessionText("Typing debug log cleared");
+      return [];
+    },
+    show: showTypingDebugLog,
+    copy: copyTypingDebugLog,
+    getEntries: () => [...typingDebugBuffer],
+    summary: typingLatencySummary,
+  };
+  if (typingDebugEnabled) observeTypingLongTasks();
+  return window.TextForgeTypingDebug;
+}
+
 function scheduleContentColorAdaptation(delay = 300) {
   clearTimeout(colorAdaptTimer);
   colorAdaptTimer = setTimeout(() => {
@@ -807,6 +1089,11 @@ COMMANDS.splice(COMMANDS.findIndex((item) => item.id === "split-single"), 0,
   { id: "format-debug-off", title: "Format Debug Off", hint: "Disable rich text formatting debug logs", labOnly: true, run: () => setFormatDebugEnabled(false) },
   { id: "format-debug-show", title: "Show Format Debug Log", hint: "Print recent formatting debug entries to console", labOnly: true, run: showFormatDebugLog },
   { id: "format-debug-copy", title: "Copy Format Debug Log", hint: "Copy recent formatting debug entries as JSON", labOnly: true, run: copyFormatDebugLog },
+  { id: "typing-debug-on", title: "Typing Debug On", hint: "Enable typing latency instrumentation", labOnly: true, run: () => setTypingDebugEnabled(true) },
+  { id: "typing-debug-off", title: "Typing Debug Off", hint: "Disable typing latency instrumentation", labOnly: true, run: () => setTypingDebugEnabled(false) },
+  { id: "typing-debug-show", title: "Show Typing Debug Log", hint: "Print recent typing latency entries to console", labOnly: true, run: showTypingDebugLog },
+  { id: "typing-debug-copy", title: "Copy Typing Debug Log", hint: "Copy recent typing latency entries as JSON", labOnly: true, run: copyTypingDebugLog },
+  { id: "typing-debug-summary", title: "Typing Latency Summary", hint: "Summarize typing latency samples and slow steps", labOnly: true, run: typingLatencySummary },
 );
 
 if (!documents.length) {
@@ -883,11 +1170,16 @@ function normalizeDocuments(items) {
 }
 
 function refreshDocDerived(doc) {
+  markTypingTrace("refreshDocDerived:start");
   doc.tags = safeArray(doc.tags);
   doc.title = safeString(doc.title, "Untitled");
   doc.content = safeString(doc.content);
+  markTypingTrace("before refresh sanitizeRichHtml");
   doc.contentHtml = sanitizeRichHtml(safeString(doc.contentHtml) || markdownToHtml(doc.content));
+  markTypingTrace("after refresh sanitizeRichHtml", { htmlLength: doc.contentHtml.length });
+  markTypingTrace("before htmlToPlain");
   const plain = htmlToPlain(doc.contentHtml || markdownToHtml(doc.content || ""));
+  markTypingTrace("after htmlToPlain", { plainLength: plain.length });
   const preview = plain.replace(/\s+/g, " ").trim().slice(0, 120);
   doc.plainText = plain;
   doc.previewText = preview || "빈 문서";
@@ -902,6 +1194,7 @@ function refreshDocDerived(doc) {
     value: doc.searchText,
     configurable: true,
   });
+  markTypingTrace("refreshDocDerived:end", { wordCount: doc.wordCount, charCount: doc.charCount });
   return doc;
 }
 
@@ -1531,9 +1824,15 @@ function updateActive(mutator) {
   const before = doc.content;
   mutator(doc);
   doc.updatedAt = new Date().toISOString();
+  markTypingTrace("before refreshDocDerived");
   refreshDocDerived(doc);
+  markTypingTrace("after refreshDocDerived");
+  markTypingTrace("before maybeAutoSnapshot");
   maybeAutoSnapshot(doc, before);
+  markTypingTrace("after maybeAutoSnapshot");
+  markTypingTrace("before persistSoon");
   persistSoon();
+  markTypingTrace("after persistSoon");
 }
 
 function cancelPendingPostSwitchRender() {
@@ -2186,14 +2485,23 @@ function currentPlainText() {
 }
 
 function syncRichToDocument() {
+  markTypingTrace("syncRichToDocument:start");
   const guard = beginLockedReferenceGuard("rich-input", 900);
+  markTypingTrace("before read innerHTML");
   const beforeEditorHtml = els.richEditor.innerHTML;
+  markTypingTrace("after read innerHTML", { htmlLength: beforeEditorHtml.length });
   const beforeDocHtml = activeDoc()?.contentHtml || "";
+  markTypingTrace("before sanitizeRichHtml");
   const html = sanitizeRichHtml(els.richEditor.innerHTML);
+  markTypingTrace("after sanitizeRichHtml", { htmlLength: html.length });
+  markTypingTrace("before updateActive");
   updateActive((doc) => {
     doc.contentHtml = html;
+    markTypingTrace("before htmlToMarkdown");
     doc.content = htmlToMarkdown(html);
+    markTypingTrace("after htmlToMarkdown", { markdownLength: doc.content.length });
   });
+  markTypingTrace("after updateActive");
   formatDebugLog("syncRichToDocument", {
     beforeEditorHTML: summarizeHtmlForFormatDebug(beforeEditorHtml),
     beforeDocHTML: summarizeHtmlForFormatDebug(beforeDocHtml),
@@ -2201,8 +2509,13 @@ function syncRichToDocument() {
     docHTMLChanged: beforeDocHtml !== activeDoc()?.contentHtml,
   });
   els.editor.value = activeDoc().content;
+  markTypingTrace("before renderPreview");
   renderPreview();
+  markTypingTrace("after renderPreview");
+  markTypingTrace("before updateStats");
   updateStats();
+  markTypingTrace("after updateStats");
+  markTypingTrace("syncRichToDocument:end");
   restoreLockedReferenceGuard(guard);
 }
 
@@ -2219,6 +2532,7 @@ function syncSourceToDocument() {
 }
 
 function sanitizeRichHtml(html) {
+  markTypingTrace("sanitizeRichHtml:start", { htmlLength: safeString(html).length });
   const template = document.createElement("template");
   const beforeSummary = summarizeHtmlForFormatDebug(html);
   template.innerHTML = html;
@@ -2237,6 +2551,10 @@ function sanitizeRichHtml(html) {
   formatDebugLog("sanitizeRichHtml", {
     before: beforeSummary,
     after: afterSummary,
+    removedStyleCount: Math.max(0, beforeSummary.styleAttributeCount - afterSummary.styleAttributeCount),
+  });
+  markTypingTrace("sanitizeRichHtml:end", {
+    htmlLength: result.length,
     removedStyleCount: Math.max(0, beforeSummary.styleAttributeCount - afterSummary.styleAttributeCount),
   });
   return result;
@@ -3564,6 +3882,12 @@ function insertStyledTextAtSelection(text, styleMap) {
 }
 
 function applyPendingTypingStyleOnBeforeInput(event) {
+  if (!activeTypingTrace) createTypingTrace(event, "beforeinput");
+  markTypingTrace("typing:beforeinput", {
+    inputType: event.inputType,
+    dataLength: event.data?.length || 0,
+    isComposing: event.isComposing,
+  });
   formatDebugLog("beforeinput", {
     inputType: event.inputType,
     hasData: Boolean(event.data),
@@ -3583,7 +3907,9 @@ function applyPendingTypingStyleOnBeforeInput(event) {
   });
   if (!applied) return;
   event.preventDefault();
+  markTypingTrace("before syncRichToDocument");
   syncRichToDocument();
+  finishTypingTrace();
   focusWithoutScroll(els.richEditor);
 }
 
@@ -3679,6 +4005,7 @@ function insertHtmlAtCursor(html) {
 }
 
 function handleRichPaste(event) {
+  recordTypingEvent("typing:paste", event);
   formatDebugLog("paste", {
     itemCount: event.clipboardData?.items?.length || 0,
     types: [...(event.clipboardData?.types || [])],
@@ -3891,18 +4218,33 @@ els.editor.addEventListener("input", () => {
 });
 
 els.richEditor.addEventListener("input", (event) => {
+  const trace = activeTypingTrace || createTypingTrace(event, "input");
+  if (trace && !trace.inputStartMs) trace.inputStartMs = performance.now();
+  markTypingTrace("typing:input:start", {
+    inputType: event.inputType,
+    dataLength: event.data?.length || 0,
+    isComposing: event.isComposing,
+  });
   formatDebugLog("input", {
     inputType: event.inputType,
     isComposing: event.isComposing,
     pendingTypingStyle: { ...pendingTypingStyle },
     editorHTML: summarizeHtmlForFormatDebug(els.richEditor.innerHTML),
   });
+  markTypingTrace("before syncRichToDocument");
   syncRichToDocument();
+  finishTypingTrace();
 });
 els.richEditor.addEventListener("beforeinput", applyPendingTypingStyleOnBeforeInput);
 els.richEditor.addEventListener("paste", handleRichPaste);
-els.richEditor.addEventListener("compositionstart", () => formatDebugLog("compositionstart", { selection: getSelectionDebugSummary() }));
-els.richEditor.addEventListener("compositionend", () => formatDebugLog("compositionend", { selection: getSelectionDebugSummary(), pendingTypingStyle: { ...pendingTypingStyle } }));
+els.richEditor.addEventListener("compositionstart", (event) => {
+  recordTypingEvent("typing:compositionstart", event);
+  formatDebugLog("compositionstart", { selection: getSelectionDebugSummary() });
+});
+els.richEditor.addEventListener("compositionend", (event) => {
+  recordTypingEvent("typing:compositionend", event);
+  formatDebugLog("compositionend", { selection: getSelectionDebugSummary(), pendingTypingStyle: { ...pendingTypingStyle } });
+});
 els.richEditor.addEventListener("keyup", saveEditorSelection);
 els.richEditor.addEventListener("mouseup", saveEditorSelection);
 els.richEditor.addEventListener("focus", saveEditorSelection);
@@ -4089,6 +4431,9 @@ els.wrapToggleBtn.addEventListener("click", () => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (event.target === els.richEditor || els.richEditor.contains(event.target)) {
+    recordTypingEvent("typing:keydown", event);
+  }
   if (event.key === "Escape") {
     closeFloatingUi();
     if (!els.commandOverlay.classList.contains("hidden")) closeCommandPalette();
