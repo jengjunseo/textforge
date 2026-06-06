@@ -188,6 +188,11 @@ let referenceRenderTimer = null;
 let postSwitchRenderTimer = null;
 let postSwitchRenderFrame = null;
 let splitWorkspaceRenderTimer = null;
+let richFullSyncTimer = null;
+let previewUpdateTimer = null;
+let statsUpdateTimer = null;
+let richDocumentDirty = false;
+let compositionActive = false;
 let savedEditorSelection = null;
 let pendingTypingStyle = {};
 let formatDebugEnabled = localStorage.getItem("textforge.formatDebug") === "true";
@@ -519,6 +524,10 @@ function setFormatDebugEnabled(enabled) {
   return formatDebugEnabled;
 }
 
+function isFormatDebugActive() {
+  return formatDebugEnabled || window.TEXTFORGE_FORMAT_DEBUG === true;
+}
+
 function showFormatDebugLog() {
   if (console.table) console.table(formatDebugBuffer);
   else console.log("[format-debug] entries", formatDebugBuffer);
@@ -755,6 +764,7 @@ function typingLatencySummary() {
   const traces = typingDebugBuffer.filter((trace) => trace.steps?.some((step) => step.label === "typing:input:end"));
   const stepDurations = new Map();
   const stagePairs = [
+    ["syncRichToDocumentFast", "syncRichToDocumentFast:start", "syncRichToDocumentFast:end"],
     ["syncRichToDocument", "syncRichToDocument:start", "syncRichToDocument:end"],
     ["sanitizeRichHtml", "sanitizeRichHtml:start", "sanitizeRichHtml:end"],
     ["htmlToMarkdown", "before htmlToMarkdown", "after htmlToMarkdown"],
@@ -1491,6 +1501,7 @@ function focusWithoutScroll(element) {
 }
 
 function openDocumentInPane(documentId, paneId = "main", options = {}) {
+  if (paneId === "main") flushRichDocumentNow("before-document-switch");
   if (paneId === "main") startDocumentSwitchTrace(documentId, options.source || "unknown");
   markDocumentSwitch("openDocumentInPane:start");
   const doc = documents.find((item) => item.id === documentId);
@@ -1801,13 +1812,16 @@ function refreshSplitDocumentSelectors() {
   }
 }
 
-function persistSoon() {
+function persistSoon(options = {}) {
   els.saveState.textContent = "저장 중...";
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(persistNow, 250);
+  const delay = options.delay ?? 250;
+  const flushRich = options.flushRich !== false;
+  saveTimer = setTimeout(() => persistNow({ flushRich }), delay);
 }
 
-function persistNow() {
+function persistNow(options = {}) {
+  if (options.flushRich !== false) flushRichDocumentNow("persist");
   safeLocalSet(ACTIVE_KEY, activeId || "");
   safeLocalSet(FOLDERS_KEY, JSON.stringify(folders));
   safeLocalSet(SESSION_KEY, JSON.stringify({ id: activeId, title: activeDoc()?.title || "", updatedAt: activeDoc()?.updatedAt || "" }));
@@ -2471,20 +2485,91 @@ function renderPreview(options = {}) {
 }
 
 function currentHtml() {
+  flushRichDocumentNow("current-html");
   const doc = activeDoc();
   return doc?.contentHtml || markdownToHtml(doc?.content || els.editor.value || "");
 }
 
 function currentMarkdown() {
+  flushRichDocumentNow("current-markdown");
   const doc = activeDoc();
   return doc?.content || htmlToMarkdown(currentHtml());
 }
 
 function currentPlainText() {
+  flushRichDocumentNow("current-plain-text");
   return htmlToPlain(currentHtml());
 }
 
-function syncRichToDocument() {
+function scheduleSanitizedSync(reason = "typing", delay = 1000) {
+  clearTimeout(richFullSyncTimer);
+  richFullSyncTimer = setTimeout(() => {
+    flushRichDocumentNow(reason, { renderPreviewNow: isPreviewPaneVisible(), updateStatsNow: false });
+  }, delay);
+}
+
+function schedulePreviewUpdate(delay = 500) {
+  if (!isPreviewPaneVisible() && splitWorkspace.layout === "single") return;
+  clearTimeout(previewUpdateTimer);
+  previewUpdateTimer = setTimeout(() => {
+    flushRichDocumentNow("preview-update");
+    renderPreview();
+  }, delay);
+}
+
+function scheduleStatsUpdate(delay = 500) {
+  clearTimeout(statsUpdateTimer);
+  statsUpdateTimer = setTimeout(() => {
+    flushRichDocumentNow("stats-update");
+    updateStats();
+  }, delay);
+}
+
+function flushRichDocumentNow(reason = "manual", options = {}) {
+  if (!richDocumentDirty) return activeDoc();
+  clearTimeout(richFullSyncTimer);
+  richFullSyncTimer = null;
+  return syncRichToDocumentFull({
+    reason,
+    renderPreviewNow: options.renderPreviewNow ?? false,
+    updateStatsNow: options.updateStatsNow ?? false,
+  });
+}
+
+function syncRichToDocumentFast(event = null) {
+  markTypingTrace("syncRichToDocumentFast:start");
+  const guard = beginLockedReferenceGuard("rich-input-fast", 900);
+  markTypingTrace("before read innerHTML");
+  const html = els.richEditor.innerHTML;
+  markTypingTrace("after read innerHTML", { htmlLength: html.length });
+  const doc = activeDoc();
+  if (!doc) {
+    restoreLockedReferenceGuard(guard);
+    return null;
+  }
+  const beforeDocHtml = doc.contentHtml || "";
+  doc.contentHtml = html;
+  doc.updatedAt = new Date().toISOString();
+  richDocumentDirty = true;
+  els.saveState.textContent = "저장 중...";
+  if (isFormatDebugActive()) {
+    formatDebugLog("syncRichToDocumentFast", {
+      inputType: event?.inputType || null,
+      beforeDocHTML: summarizeHtmlForFormatDebug(beforeDocHtml),
+      afterDocHTML: summarizeHtmlForFormatDebug(html),
+      docHTMLChanged: beforeDocHtml !== html,
+    });
+  }
+  scheduleSanitizedSync(compositionActive || event?.isComposing ? "composition-idle" : "typing-idle", compositionActive || event?.isComposing ? 1400 : 1000);
+  schedulePreviewUpdate(splitWorkspace.layout !== "single" ? 600 : 400);
+  scheduleStatsUpdate(450);
+  persistSoon({ delay: 1400, flushRich: true });
+  markTypingTrace("syncRichToDocumentFast:end");
+  restoreLockedReferenceGuard(guard);
+  return doc;
+}
+
+function syncRichToDocumentFull(options = {}) {
   markTypingTrace("syncRichToDocument:start");
   const guard = beginLockedReferenceGuard("rich-input", 900);
   markTypingTrace("before read innerHTML");
@@ -2501,6 +2586,7 @@ function syncRichToDocument() {
     doc.content = htmlToMarkdown(html);
     markTypingTrace("after htmlToMarkdown", { markdownLength: doc.content.length });
   });
+  richDocumentDirty = false;
   markTypingTrace("after updateActive");
   formatDebugLog("syncRichToDocument", {
     beforeEditorHTML: summarizeHtmlForFormatDebug(beforeEditorHtml),
@@ -2509,14 +2595,23 @@ function syncRichToDocument() {
     docHTMLChanged: beforeDocHtml !== activeDoc()?.contentHtml,
   });
   els.editor.value = activeDoc().content;
-  markTypingTrace("before renderPreview");
-  renderPreview();
-  markTypingTrace("after renderPreview");
-  markTypingTrace("before updateStats");
-  updateStats();
-  markTypingTrace("after updateStats");
+  if (options.renderPreviewNow !== false) {
+    markTypingTrace("before renderPreview");
+    renderPreview();
+    markTypingTrace("after renderPreview");
+  }
+  if (options.updateStatsNow !== false) {
+    markTypingTrace("before updateStats");
+    updateStats();
+    markTypingTrace("after updateStats");
+  }
   markTypingTrace("syncRichToDocument:end");
   restoreLockedReferenceGuard(guard);
+  return activeDoc();
+}
+
+function syncRichToDocument() {
+  return syncRichToDocumentFull({ renderPreviewNow: true, updateStatsNow: true });
 }
 
 function syncSourceToDocument() {
@@ -2769,8 +2864,11 @@ function cleanText(text) {
     .trim();
 }
 
-function updateStats() {
-  const value = currentPlainText();
+function updateStats(options = {}) {
+  const doc = activeDoc();
+  const value = options.fast
+    ? els.richEditor.textContent || doc?.plainText || ""
+    : doc?.plainText || currentPlainText();
   const chars = value.length.toLocaleString("ko-KR");
   const lines = value.split("\n").length.toLocaleString("ko-KR");
   const longest = longestLine(value);
@@ -3279,6 +3377,7 @@ function concatBytes(parts) {
 }
 
 function recoverSession() {
+  flushRichDocumentNow("before-session-recover");
   try {
     const snapshot = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
     if (!snapshot || typeof snapshot !== "object") return;
@@ -3422,6 +3521,7 @@ function toggleLogMode() {
 }
 
 function createAndFocusDocument() {
+  flushRichDocumentNow("before-new-document");
   const doc = createDocument("");
   documents.unshift(doc);
   activeId = doc.id;
@@ -3447,11 +3547,7 @@ function renderCommands() {
     id: `doc-${doc.id}`,
     title: doc.title,
     hint: `문서 열기 · ${doc.tags.map((tag) => `#${tag}`).join(" ") || "태그 없음"}`,
-    run: () => {
-      activeId = doc.id;
-      persistNow();
-      renderActive();
-    },
+    run: () => openDocumentInPane(doc.id, "main", { source: "command-palette" }),
   }));
 
   const items = [...COMMANDS, ...docCommands].filter((item) => {
@@ -3908,7 +4004,7 @@ function applyPendingTypingStyleOnBeforeInput(event) {
   if (!applied) return;
   event.preventDefault();
   markTypingTrace("before syncRichToDocument");
-  syncRichToDocument();
+  syncRichToDocumentFast(event);
   finishTypingTrace();
   focusWithoutScroll(els.richEditor);
 }
@@ -4225,23 +4321,31 @@ els.richEditor.addEventListener("input", (event) => {
     dataLength: event.data?.length || 0,
     isComposing: event.isComposing,
   });
-  formatDebugLog("input", {
-    inputType: event.inputType,
-    isComposing: event.isComposing,
-    pendingTypingStyle: { ...pendingTypingStyle },
-    editorHTML: summarizeHtmlForFormatDebug(els.richEditor.innerHTML),
-  });
+  if (isFormatDebugActive()) {
+    formatDebugLog("input", {
+      inputType: event.inputType,
+      isComposing: event.isComposing,
+      pendingTypingStyle: { ...pendingTypingStyle },
+      editorHTML: summarizeHtmlForFormatDebug(els.richEditor.innerHTML),
+    });
+  }
   markTypingTrace("before syncRichToDocument");
-  syncRichToDocument();
+  syncRichToDocumentFast(event);
+  markTypingTrace("before updateStats");
+  updateStats({ fast: true });
+  markTypingTrace("after updateStats");
   finishTypingTrace();
 });
 els.richEditor.addEventListener("beforeinput", applyPendingTypingStyleOnBeforeInput);
 els.richEditor.addEventListener("paste", handleRichPaste);
 els.richEditor.addEventListener("compositionstart", (event) => {
+  compositionActive = true;
   recordTypingEvent("typing:compositionstart", event);
   formatDebugLog("compositionstart", { selection: getSelectionDebugSummary() });
 });
 els.richEditor.addEventListener("compositionend", (event) => {
+  compositionActive = false;
+  scheduleSanitizedSync("composition-end", 900);
   recordTypingEvent("typing:compositionend", event);
   formatDebugLog("compositionend", { selection: getSelectionDebugSummary(), pendingTypingStyle: { ...pendingTypingStyle } });
 });
@@ -4453,6 +4557,10 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     cleanPaste();
   }
+});
+
+window.addEventListener("beforeunload", () => {
+  flushRichDocumentNow("beforeunload");
 });
 
 window.TextForgeDocumentSwitchPerf = {
