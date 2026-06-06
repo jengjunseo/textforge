@@ -987,7 +987,7 @@ a,
 }
 
 .guard-banner {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 12px;
   padding: 10px 22px;
@@ -1604,6 +1604,18 @@ textarea.no-wrap {
   white-space: pre;
   overflow-wrap: normal;
   overflow-x: auto;
+}
+
+.rich-editor.no-wrap,
+html.wrap-off .rich-editor {
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+html.wrap-on .rich-editor {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .preview {

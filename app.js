@@ -6,6 +6,7 @@ const FOLDERS_KEY = "textforge.folders.v1";
 const THEME_KEY = "textforge.theme";
 const SPLIT_WORKSPACE_KEY = "textforge.splitWorkspace";
 const FOCUS_MODE_KEY = "textforge.focusMode";
+const WORD_WRAP_KEY = "textforge.wordWrap";
 const DB_NAME = "textforge-personal-storage";
 const DB_VERSION = 1;
 const STORAGE_POINTER_KEY = "textforge.pointer.v2";
@@ -169,6 +170,7 @@ let inspectorOpen = localStorage.getItem("textforge.inspectorOpen") === "true";
 let inspectorTab = localStorage.getItem("textforge.inspectorTab") || "toc";
 let uiMode = localStorage.getItem("textforge.uiMode") || "pro";
 let focusMode = localStorage.getItem(FOCUS_MODE_KEY) === "true";
+let wordWrapEnabled = localStorage.getItem(WORD_WRAP_KEY) !== "false";
 let finderState = {
   query: "",
   sort: "updated",
@@ -2677,6 +2679,23 @@ function maybeAutoSnapshot(doc, previousContent) {
   }
 }
 
+function createSafetySnapshot(reason = "before-bulk-edit") {
+  const doc = activeDoc();
+  if (!doc) return null;
+  const label = `Safety: ${reason}`;
+  const last = doc.history?.[0];
+  const htmlLength = (doc.contentHtml || "").length;
+  if (last?.label === label && last?.contentHtml === doc.contentHtml) return last;
+  addSnapshot(doc, label);
+  setSessionText(`Safety snapshot created: ${reason} (${htmlLength.toLocaleString("ko-KR")} HTML chars)`);
+  return doc.history[0];
+}
+
+function createWholeDocumentSafetySnapshot(reason, range = getEditorRangeFromSelection()) {
+  if (!range || !isWholeEditorSelection(range)) return null;
+  return createSafetySnapshot(reason);
+}
+
 function addSnapshot(doc, label = "자동 스냅샷") {
   doc.history = [
     {
@@ -2872,14 +2891,9 @@ function updateStats(options = {}) {
   const chars = value.length.toLocaleString("ko-KR");
   const lines = value.split("\n").length.toLocaleString("ko-KR");
   const longest = longestLine(value);
-  els.statsText.textContent = `${lines} lines / ${chars} chars`;
-
-  if (longest > LONG_LINE_LIMIT) {
-    els.guardBanner.classList.remove("hidden");
-    els.guardText.textContent = `긴 줄이 ${longest.toLocaleString("ko-KR")}자입니다. 성능 보호 모드를 활성화합니다.`;
-  } else {
-    els.guardBanner.classList.add("hidden");
-  }
+  const longLineText = longest > LONG_LINE_LIMIT ? ` / long line ${longest.toLocaleString("ko-KR")}` : "";
+  els.statsText.textContent = `${lines} lines / ${chars} chars${longLineText}`;
+  els.guardBanner.classList.add("hidden");
 }
 function setMode(mode) {
   savePaneScroll("main");
@@ -3515,8 +3529,8 @@ function insertTextAtCursor(text) {
 function toggleLogMode() {
   logMode = !logMode;
   document.body.classList.toggle("log-mode", logMode);
-  els.editor.classList.toggle("no-wrap", logMode);
   els.logModeBtn.textContent = logMode ? "일반" : "로그";
+  applyWordWrapPreference();
   renderSystemPanel();
 }
 
@@ -3633,22 +3647,28 @@ function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
   if (line && lines < maxLines) ctx.fillText(line, x, y);
 }
 
+function applyWordWrapPreference() {
+  document.documentElement.classList.toggle("wrap-off", !wordWrapEnabled);
+  document.documentElement.classList.toggle("wrap-on", wordWrapEnabled);
+  els.editor.classList.toggle("no-wrap", !wordWrapEnabled);
+  els.richEditor.classList.toggle("no-wrap", !wordWrapEnabled);
+  if (els.wrapToggleBtn) els.wrapToggleBtn.textContent = wordWrapEnabled ? "줄바꿈 끄기" : "줄바꿈 켜기";
+}
+
+function toggleWordWrapDisplayOnly() {
+  wordWrapEnabled = !wordWrapEnabled;
+  localStorage.setItem(WORD_WRAP_KEY, wordWrapEnabled ? "true" : "false");
+  applyWordWrapPreference();
+  setSessionText(wordWrapEnabled ? "Word wrap on" : "Word wrap off");
+}
+
 function insertHardBreaks() {
-  const value = els.editor.value
-    .split("\n")
-    .map((line) => (line.length > 120 ? line.match(/.{1,100}(?:\s|$)|.{1,100}/g).join("\n") : line))
-    .join("\n");
-  updateActive((doc) => {
-    doc.content = value;
-    doc.contentHtml = markdownToHtml(value);
-  });
-  els.editor.value = value;
-  setRichEditorHtmlPrepared(activeDoc().contentHtml);
-  renderPreview();
-  updateStats();
+  toggleWordWrapDisplayOnly();
 }
 
 function applyFormat(command, value = null) {
+  const initialRange = getEditorRangeFromSelection();
+  createWholeDocumentSafetySnapshot(`before-format-${command}`, initialRange);
   formatDebugLog("applyFormat:start", {
     command,
     value,
@@ -3672,6 +3692,8 @@ function applyFormat(command, value = null) {
 }
 
 function applyBlockStyle(tag) {
+  const initialRange = getEditorRangeFromSelection();
+  createWholeDocumentSafetySnapshot(`before-block-${tag}`, initialRange);
   restoreEditorSelection();
   focusWithoutScroll(els.richEditor);
   document.execCommand("formatBlock", false, tag);
@@ -3947,6 +3969,7 @@ function clearFormattingToDefault() {
     focusWithoutScroll(els.richEditor);
     return;
   }
+  createWholeDocumentSafetySnapshot("before-clear-formatting", range);
   const beforeHtml = els.richEditor.innerHTML;
   const applied = isComplexRange(range) ? clearFormattingInComplexSelection(range) : clearFormattingInSelection(range);
   if (applied) {
@@ -4055,6 +4078,7 @@ function applyInlineStyle(property, value) {
     return;
   }
   setPendingTypingStyle(property, value);
+  createWholeDocumentSafetySnapshot(`before-inline-${property}`, range);
   const complexSelection = isComplexRange(range);
   if (applyInlineStyleToSelection(styleMap, range)) {
     const afterHtml = els.richEditor.innerHTML;
@@ -4528,11 +4552,8 @@ els.systemList.addEventListener("click", (event) => {
     }
   }
 });
-els.breakLineBtn.addEventListener("click", insertHardBreaks);
-els.wrapToggleBtn.addEventListener("click", () => {
-  els.editor.classList.toggle("no-wrap");
-  els.wrapToggleBtn.textContent = els.editor.classList.contains("no-wrap") ? "줄바꿈 켜기" : "줄바꿈 꺼기";
-});
+els.breakLineBtn.addEventListener("click", toggleWordWrapDisplayOnly);
+els.wrapToggleBtn.addEventListener("click", toggleWordWrapDisplayOnly);
 
 document.addEventListener("keydown", (event) => {
   if (event.target === els.richEditor || els.richEditor.contains(event.target)) {
@@ -4575,6 +4596,7 @@ initFloatingUiDismiss();
 setUiMode(uiMode);
 focusMode = loadFocusModeState();
 updateFocusModeUi();
+applyWordWrapPreference();
 initPwaInstallHints();
 renderInspectorState();
 renderActive();
