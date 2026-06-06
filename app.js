@@ -6,6 +6,7 @@ const FOLDERS_KEY = "textforge.folders.v1";
 const THEME_KEY = "textforge.theme";
 const SPLIT_WORKSPACE_KEY = "textforge.splitWorkspace";
 const FOCUS_MODE_KEY = "textforge.focusMode";
+const FOCUS_WIDTH_KEY = "textforge.focusCanvasWidth";
 const WORD_WRAP_KEY = "textforge.wordWrap";
 const DB_NAME = "textforge-personal-storage";
 const DB_VERSION = 1;
@@ -16,6 +17,9 @@ const AUTO_SNAPSHOT_INTERVAL = 90000;
 const CARD_WIDTH = 1200;
 const CARD_HEIGHT = 675;
 const FINDER_PAGE_SIZE = 24;
+const FOCUS_WIDTH_DEFAULT = 860;
+const FOCUS_WIDTH_MIN = 640;
+const FOCUS_WIDTH_MAX = 1200;
 const DOC_COLORS = ["#167c80", "#576cbc", "#b24f3f", "#8a6f2a", "#4f7b45", "#7a4e9d", "#ad6a2b"];
 
 const DEFAULT_PROMPTS = [
@@ -45,6 +49,8 @@ const els = {
   saveState: document.querySelector("#saveState"),
   editor: document.querySelector("#editor"),
   richEditor: document.querySelector("#richEditor"),
+  focusResizeLeft: document.querySelector("#focusResizeLeft"),
+  focusResizeRight: document.querySelector("#focusResizeRight"),
   preview: document.querySelector("#preview"),
   editorGrid: document.querySelector("#editorGrid"),
   editorPaneLabel: document.querySelector("#editorPaneLabel"),
@@ -170,6 +176,7 @@ let inspectorOpen = localStorage.getItem("textforge.inspectorOpen") === "true";
 let inspectorTab = localStorage.getItem("textforge.inspectorTab") || "toc";
 let uiMode = localStorage.getItem("textforge.uiMode") || "pro";
 let focusMode = localStorage.getItem(FOCUS_MODE_KEY) === "true";
+let focusCanvasWidth = Number(localStorage.getItem(FOCUS_WIDTH_KEY)) || FOCUS_WIDTH_DEFAULT;
 let wordWrapEnabled = localStorage.getItem(WORD_WRAP_KEY) !== "false";
 let finderState = {
   query: "",
@@ -205,6 +212,9 @@ let activeTypingTrace = null;
 let typingTraceSequence = 0;
 let typingLongTaskObserver = null;
 let typingLongTaskEntries = [];
+let bulkUndoStack = [];
+let bulkRedoStack = [];
+let bulkUndoPending = false;
 let paneScrollSyncing = false;
 let lockedReferenceGuard = null;
 let splitScrollDriftWarned = false;
@@ -2104,6 +2114,26 @@ function saveFocusModeState() {
   localStorage.setItem(FOCUS_MODE_KEY, String(focusMode));
 }
 
+function clampFocusCanvasWidth(value) {
+  const viewportLimit = Math.max(FOCUS_WIDTH_MIN, Math.min(FOCUS_WIDTH_MAX, window.innerWidth - 96));
+  return Math.round(Math.max(FOCUS_WIDTH_MIN, Math.min(viewportLimit, value || FOCUS_WIDTH_DEFAULT)));
+}
+
+function applyFocusCanvasWidth(width = focusCanvasWidth) {
+  focusCanvasWidth = clampFocusCanvasWidth(width);
+  document.documentElement.style.setProperty("--tf-focus-width", `${focusCanvasWidth}px`);
+  document.documentElement.style.setProperty("--tf-focus-half-width", `${Math.round(focusCanvasWidth / 2)}px`);
+}
+
+function saveFocusCanvasWidth() {
+  localStorage.setItem(FOCUS_WIDTH_KEY, String(focusCanvasWidth));
+}
+
+function resetFocusCanvasWidth() {
+  applyFocusCanvasWidth(FOCUS_WIDTH_DEFAULT);
+  saveFocusCanvasWidth();
+}
+
 function updateFocusModeUi() {
   document.documentElement.classList.toggle("focus-mode", focusMode);
   els.focusModeBtn?.classList.toggle("active", focusMode);
@@ -2118,6 +2148,42 @@ function applyFocusMode(enabled) {
 
 function toggleFocusMode() {
   applyFocusMode(!focusMode);
+}
+
+function initFocusResizeHandles() {
+  const handles = [els.focusResizeLeft, els.focusResizeRight].filter(Boolean);
+  if (!handles.length) return;
+  handles.forEach((handle) => {
+    handle.addEventListener("dblclick", resetFocusCanvasWidth);
+    handle.addEventListener("pointerdown", (event) => {
+      if (!focusMode) return;
+      event.preventDefault();
+      const startX = event.clientX;
+      const startWidth = focusCanvasWidth;
+      const side = handle.dataset.side || (handle === els.focusResizeLeft ? "left" : "right");
+      handle.setPointerCapture?.(event.pointerId);
+      document.documentElement.classList.add("focus-resizing");
+      const move = (moveEvent) => {
+        const delta = moveEvent.clientX - startX;
+        const nextWidth = side === "left" ? startWidth - delta * 2 : startWidth + delta * 2;
+        applyFocusCanvasWidth(nextWidth);
+      };
+      const stop = () => {
+        document.documentElement.classList.remove("focus-resizing");
+        saveFocusCanvasWidth();
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", stop);
+        window.removeEventListener("pointercancel", stop);
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", stop);
+      window.addEventListener("pointercancel", stop);
+    });
+  });
+  window.addEventListener("resize", () => {
+    applyFocusCanvasWidth(focusCanvasWidth);
+    saveFocusCanvasWidth();
+  });
 }
 
 function initPwaInstallHints() {
@@ -2696,6 +2762,69 @@ function createWholeDocumentSafetySnapshot(reason, range = getEditorRangeFromSel
   return createSafetySnapshot(reason);
 }
 
+function captureActiveDocumentState(reason = "bulk-edit") {
+  const doc = activeDoc();
+  if (!doc) return null;
+  return {
+    reason,
+    docId: doc.id,
+    title: doc.title,
+    content: doc.content,
+    contentHtml: doc.contentHtml,
+    updatedAt: doc.updatedAt,
+  };
+}
+
+function pushBulkOperationUndoState(reason, beforeState) {
+  const doc = activeDoc();
+  if (!doc || !beforeState || beforeState.docId !== doc.id) return;
+  if (beforeState.contentHtml === doc.contentHtml && beforeState.content === doc.content) return;
+  bulkUndoStack.push({
+    reason,
+    before: beforeState,
+    after: captureActiveDocumentState(reason),
+  });
+  bulkUndoStack = bulkUndoStack.slice(-20);
+  bulkRedoStack = [];
+  bulkUndoPending = true;
+}
+
+function applyDocumentStateSnapshot(state) {
+  if (!state) return false;
+  const doc = documents.find((item) => item.id === state.docId);
+  if (!doc) return false;
+  doc.title = state.title;
+  doc.content = state.content;
+  doc.contentHtml = state.contentHtml;
+  doc.updatedAt = new Date().toISOString();
+  refreshDocDerived(doc);
+  activeId = doc.id;
+  persistNow({ flushRich: false });
+  renderActive();
+  renderDocList();
+  return true;
+}
+
+function restoreLastBulkOperation() {
+  const entry = bulkUndoStack.pop();
+  if (!entry) return false;
+  if (!applyDocumentStateSnapshot(entry.before)) return false;
+  bulkRedoStack.push(entry);
+  bulkUndoPending = false;
+  setSessionText(`Restored bulk operation: ${entry.reason}`);
+  return true;
+}
+
+function redoLastBulkOperation() {
+  const entry = bulkRedoStack.pop();
+  if (!entry) return false;
+  if (!applyDocumentStateSnapshot(entry.after)) return false;
+  bulkUndoStack.push(entry);
+  bulkUndoPending = true;
+  setSessionText(`Redid bulk operation: ${entry.reason}`);
+  return true;
+}
+
 function addSnapshot(doc, label = "자동 스냅샷") {
   doc.history = [
     {
@@ -3235,15 +3364,25 @@ function flashCopyState(type) {
   }, 1800);
 }
 function cleanAiOutput() {
+  const sourceDoc = activeDoc();
+  if (!sourceDoc) return;
+  const confirmed = confirm("AI 출력 정리는 현재 문서 전체를 plain text 기준으로 정리합니다. 원본은 유지하고 정리 결과를 새 문서로 만듭니다. 계속할까요?");
+  if (!confirmed) return;
+  createSafetySnapshot("before-ai-cleanup");
   const cleaned = cleanText(currentPlainText());
-  updateActive((doc) => {
-    doc.content = cleaned;
-    doc.contentHtml = markdownToHtml(cleaned);
-  });
-  els.editor.value = cleaned;
-  setRichEditorHtmlPrepared(activeDoc().contentHtml);
-  renderPreview();
-  updateStats();
+  const now = new Date();
+  const cleanedDoc = createDocument(cleaned);
+  cleanedDoc.title = `${sourceDoc.title || "Untitled"} - cleaned`;
+  cleanedDoc.tags = [...new Set([...(sourceDoc.tags || []), "cleaned"])];
+  cleanedDoc.folderId = sourceDoc.folderId || null;
+  cleanedDoc.color = sourceDoc.color;
+  cleanedDoc.createdAt = now.toISOString();
+  cleanedDoc.updatedAt = now.toISOString();
+  refreshDocDerived(cleanedDoc);
+  documents.unshift(cleanedDoc);
+  openDocumentInPane(cleanedDoc.id, "main", { source: "ai-cleanup" });
+  persistNow();
+  setSessionText("AI cleanup created a new document; original kept unchanged.");
 }
 
 function exportFile(kind) {
@@ -3669,6 +3808,7 @@ function insertHardBreaks() {
 function applyFormat(command, value = null) {
   const initialRange = getEditorRangeFromSelection();
   createWholeDocumentSafetySnapshot(`before-format-${command}`, initialRange);
+  const bulkBefore = isWholeEditorSelection(initialRange) ? captureActiveDocumentState(`before-format-${command}`) : null;
   formatDebugLog("applyFormat:start", {
     command,
     value,
@@ -3689,16 +3829,19 @@ function applyFormat(command, value = null) {
     afterEditorHTML: summarizeHtmlForFormatDebug(els.richEditor.innerHTML),
   });
   syncRichToDocument();
+  pushBulkOperationUndoState(`format-${command}`, bulkBefore);
 }
 
 function applyBlockStyle(tag) {
   const initialRange = getEditorRangeFromSelection();
   createWholeDocumentSafetySnapshot(`before-block-${tag}`, initialRange);
+  const bulkBefore = isWholeEditorSelection(initialRange) ? captureActiveDocumentState(`before-block-${tag}`) : null;
   restoreEditorSelection();
   focusWithoutScroll(els.richEditor);
   document.execCommand("formatBlock", false, tag);
   saveEditorSelection();
   syncRichToDocument();
+  pushBulkOperationUndoState(`block-${tag}`, bulkBefore);
 }
 
 function getEditorRangeFromSelection() {
@@ -3970,6 +4113,7 @@ function clearFormattingToDefault() {
     return;
   }
   createWholeDocumentSafetySnapshot("before-clear-formatting", range);
+  const bulkBefore = isWholeEditorSelection(range) ? captureActiveDocumentState("before-clear-formatting") : null;
   const beforeHtml = els.richEditor.innerHTML;
   const applied = isComplexRange(range) ? clearFormattingInComplexSelection(range) : clearFormattingInSelection(range);
   if (applied) {
@@ -3978,6 +4122,7 @@ function clearFormattingToDefault() {
       afterEditorHTML: summarizeHtmlForFormatDebug(els.richEditor.innerHTML),
     });
     syncRichToDocument();
+    pushBulkOperationUndoState("clear-formatting", bulkBefore);
     focusWithoutScroll(els.richEditor);
   }
 }
@@ -4079,6 +4224,7 @@ function applyInlineStyle(property, value) {
   }
   setPendingTypingStyle(property, value);
   createWholeDocumentSafetySnapshot(`before-inline-${property}`, range);
+  const bulkBefore = isWholeEditorSelection(range) ? captureActiveDocumentState(`before-inline-${property}`) : null;
   const complexSelection = isComplexRange(range);
   if (applyInlineStyleToSelection(styleMap, range)) {
     const afterHtml = els.richEditor.innerHTML;
@@ -4093,6 +4239,7 @@ function applyInlineStyle(property, value) {
       afterEditorHTML: summarizeHtmlForFormatDebug(afterHtml),
     });
     syncRichToDocument();
+    pushBulkOperationUndoState(`inline-${property}`, bulkBefore);
     focusWithoutScroll(els.richEditor);
   }
 }
@@ -4334,10 +4481,14 @@ els.tagInput.addEventListener("keydown", (event) => {
 });
 
 els.editor.addEventListener("input", () => {
+  bulkUndoPending = false;
+  bulkRedoStack = [];
   syncSourceToDocument();
 });
 
 els.richEditor.addEventListener("input", (event) => {
+  bulkUndoPending = false;
+  bulkRedoStack = [];
   const trace = activeTypingTrace || createTypingTrace(event, "input");
   if (trace && !trace.inputStartMs) trace.inputStartMs = performance.now();
   markTypingTrace("typing:input:start", {
@@ -4559,6 +4710,22 @@ document.addEventListener("keydown", (event) => {
   if (event.target === els.richEditor || els.richEditor.contains(event.target)) {
     recordTypingEvent("typing:keydown", event);
   }
+  const editorShortcutTarget = event.target === els.richEditor || els.richEditor.contains(event.target) || event.target === els.editor;
+  if (editorShortcutTarget && event.ctrlKey && !event.altKey && event.code === "KeyZ") {
+    const wantsRedo = event.shiftKey;
+    if (wantsRedo && bulkRedoStack.length && redoLastBulkOperation()) {
+      event.preventDefault();
+      return;
+    }
+    if (!wantsRedo && bulkUndoPending && bulkUndoStack.length && restoreLastBulkOperation()) {
+      event.preventDefault();
+      return;
+    }
+  }
+  if (editorShortcutTarget && event.ctrlKey && !event.altKey && event.code === "KeyY" && bulkRedoStack.length && redoLastBulkOperation()) {
+    event.preventDefault();
+    return;
+  }
   if (event.key === "Escape") {
     closeFloatingUi();
     if (!els.commandOverlay.classList.contains("hidden")) closeCommandPalette();
@@ -4596,6 +4763,8 @@ initFloatingUiDismiss();
 setUiMode(uiMode);
 focusMode = loadFocusModeState();
 updateFocusModeUi();
+applyFocusCanvasWidth();
+initFocusResizeHandles();
 applyWordWrapPreference();
 initPwaInstallHints();
 renderInspectorState();

@@ -1770,10 +1770,58 @@ html.focus-mode .toolbar > .menu-wrap:not(:last-child) {
 
 html.focus-mode .rich-editor,
 html.focus-mode .preview {
-  width: min(100%, var(--editor-prose-width));
+  width: min(100%, var(--tf-focus-width, var(--editor-prose-width)));
   margin-inline: auto;
   font-size: var(--editor-font-scale);
   line-height: var(--editor-line-height);
+}
+
+.focus-resize-handle {
+  display: none;
+}
+
+html.focus-mode .editor-pane {
+  position: relative;
+}
+
+html.focus-mode .focus-resize-handle {
+  position: absolute;
+  top: 82px;
+  bottom: 22px;
+  z-index: 6;
+  display: block;
+  width: 14px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+html.focus-mode .focus-resize-handle::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 6px;
+  width: 2px;
+  content: "";
+  background: var(--border-strong);
+  opacity: 0.18;
+}
+
+html.focus-mode .focus-resize-handle:hover::before,
+html.focus-resizing .focus-resize-handle::before {
+  opacity: 0.55;
+}
+
+html.focus-mode .focus-resize-left {
+  left: max(12px, calc(50% - var(--tf-focus-half-width, 430px) - 18px));
+}
+
+html.focus-mode .focus-resize-right {
+  right: max(12px, calc(50% - var(--tf-focus-half-width, 430px) - 18px));
+}
+
+html.focus-resizing {
+  cursor: ew-resize;
+  user-select: none;
 }
 
 .command-overlay {
