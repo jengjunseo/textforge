@@ -15,8 +15,10 @@
     "test:mac-part31:browser": "node tests/macintosh-part31-browser-smoke.cjs http://localhost:4291",
     "test:mac-part4": "node tests/macintosh-part4-regression.cjs",
     "test:diet-surface": "node tests/macintosh-surface-cleanup-regression.cjs",
+    "test:migration": "node tests/textforge-migration-regression.cjs",
+    "test:migration:browser": "node tests/migration-browser-smoke.cjs http://127.0.0.1:4291",
     "benchmark:portal": "node tests/portal-library-benchmark.cjs",
-    "check": "node --check app.js && node --check forge-snapshot.js && node --check textforge-diagnostics.js && node --check portal-library-core.js && node --check portal-library.js && node --check dev-server.js && node tests/textforge-regression.cjs && node tests/portal-library-benchmark.cjs"
+    "check": "node --check app.js && node --check forge-snapshot.js && node --check textforge-diagnostics.js && node --check portal-library-core.js && node --check portal-library.js && node --check macintosh-experience.js && node --check textforge-migration.js && node --check dev-server.js && node tests/textforge-regression.cjs && node tests/textforge-migration-regression.cjs && node tests/portal-library-benchmark.cjs"
   },
   "license": "UNLICENSED"
 }

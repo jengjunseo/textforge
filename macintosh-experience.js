@@ -746,6 +746,10 @@
     };
   }
 
+  function getMigrationWorkspaces() {
+    return state.workspaces.map((workspace) => JSON.parse(JSON.stringify(workspace)));
+  }
+
   function sameWorkspaceName(name, exceptId = null) {
     const normalized = String(name || "").trim().toLocaleLowerCase();
     return state.workspaces.some((workspace) => workspace.id !== exceptId && workspace.name.trim().toLocaleLowerCase() === normalized);
@@ -1002,7 +1006,7 @@
     if (!event.shiftKey && event.key.toLowerCase() === "w") { event.preventDefault(); if (active()?.id) closeTab(active().id); }
     if (event.shiftKey && event.key.toLowerCase() === "t") { event.preventDefault(); reopenClosedTab(); }
   }, true);
-  window.TextForgeMacintoshExperience = { openQuickLook, openVersions, openQuickNote, openExportStudio, openDetached, saveWorkspace, restoreWorkspace, openWorkspaceManager, reopenClosedTab };
+  window.TextForgeMacintoshExperience = { openQuickLook, openVersions, openQuickNote, openExportStudio, openDetached, saveWorkspace, restoreWorkspace, openWorkspaceManager, reopenClosedTab, getMigrationWorkspaces };
   installChrome(); installSelectionObject(); installContextualInspector(); ensureTabs(); renderTabs(); renderContext();
   if (state.autoRestore && state.lastWorkspaceId && state.workspaces.some((workspace) => workspace.id === state.lastWorkspaceId)) restoreWorkspace(state.lastWorkspaceId);
 })();

@@ -12,6 +12,8 @@ const PORTAL_CHANNEL_NAME = "textforge.portal-library.v1";
 const DETACHED_CHANNEL_NAME = "textforge.detached-editor.v1";
 const UNIVERSAL_COMMAND_KEY = "textforge.universalCommand.v1";
 const QUICK_NOTE_OPERATION_KEY = "textforge.quickNoteOperations.v1";
+const PORTAL_PREFERENCES_KEY = "textforge.portalLibrary.preferences.v1";
+const TEXTFORGE_VERSION = "1.0.0";
 const DB_NAME = "textforge-personal-storage";
 const DB_VERSION = 1;
 const STORAGE_POINTER_KEY = "textforge.pointer.v2";
@@ -116,6 +118,7 @@ const els = {
   systemToolsBtn: document.querySelector("#systemToolsBtn"),
   inspectorToggleBtn: document.querySelector("#inspectorToggleBtn"),
   topForgeSnapshotBtn: document.querySelector("#topForgeSnapshotBtn"),
+  v2MigrationBtn: document.querySelector("#v2MigrationBtn"),
   splitSingleBtn: document.querySelector("#splitSingleBtn"),
   splitVerticalBtn: document.querySelector("#splitVerticalBtn"),
   splitHorizontalBtn: document.querySelector("#splitHorizontalBtn"),
@@ -1067,6 +1070,7 @@ const COMMANDS = [
   { id: "focus-mode-toggle", title: "집중 모드 전환", hint: "보조 UI를 접고 본문 공간 넓히기", run: toggleFocusMode },
   { id: "ui-mode", title: "UI 모드 전환", hint: "Simple / Pro / Lab 모드 전환", labOnly: true, run: () => setUiMode(uiMode === "lab" ? "simple" : uiMode === "simple" ? "pro" : "lab") },
   { id: "forge-snapshot", title: "문서함 백업", hint: "문서함을 읽기 전용 HTML 아카이브로 내보내기", run: openForgeSnapshotPanel },
+  { id: "migrate-v2", title: "TextForge V2로 마이그레이션", hint: "사용자 문서와 조직 데이터를 독립 migration 파일로 다운로드", run: exportV2Migration },
   { id: "diagnostics-open", title: "진단 패널 열기", hint: "성능/신뢰성 벤치마크 보기", labOnly: true, run: openDiagnosticsPanel },
   { id: "diagnostics-quick", title: "빠른 벤치마크 실행", hint: "핵심 지표를 빠르게 측정", labOnly: true, run: () => openDiagnosticsPanel().then(() => window.TextForgeDiagnostics?.runQuickBenchmark()) },
   { id: "diagnostics-full", title: "전체 벤치마크 실행", hint: "더미 문서 100개 memory-only 테스트", labOnly: true, run: () => openDiagnosticsPanel().then(() => window.TextForgeDiagnostics?.runFullBenchmark()) },
@@ -4248,6 +4252,43 @@ function downloadExportBlob(blob, fileName) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function readMigrationCollections() {
+  const raw = localStorage.getItem(PORTAL_PREFERENCES_KEY);
+  if (!raw) return [];
+  let preferences;
+  try { preferences = JSON.parse(raw); } catch { throw new Error("Portal collections could not be read safely."); }
+  if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) throw new Error("Portal collections are invalid.");
+  return Array.isArray(preferences.collections) ? preferences.collections : [];
+}
+
+async function exportV2Migration() {
+  const explanation = "문서, 서식, 폴더, 태그, 즐겨찾기, 프롬프트, 보호본과 사용자 조직 정보가 하나의 TextForge V2 migration 파일로 저장됩니다. 원본 문서와 저장 구조는 변경하지 않습니다. 계속할까요?";
+  if (typeof window.confirm === "function" && !window.confirm(explanation)) return { ok: false, cancelled: true };
+  try {
+    if (!window.TextForgeMigration) throw new Error("Migration bridge is unavailable.");
+    flushRichDocumentNow("before-v2-migration-export");
+    flushReferenceDocumentNow("before-v2-migration-export");
+    const payload = window.TextForgeMigration.buildPayload({
+      sourceVersion: TEXTFORGE_VERSION,
+      activeDocumentId: activeId || null,
+      documents,
+      folders,
+      prompts: customPrompts,
+      collections: readMigrationCollections(),
+      workspaces: window.TextForgeMacintoshExperience?.getMigrationWorkspaces?.() || [],
+    });
+    const text = await window.TextForgeMigration.serialize(payload);
+    const date = new Date().toISOString().slice(0, 10);
+    const fileName = window.TextForgeMigration.download(text, `textforge-v1-migration-${date}`);
+    setSessionText(`V2 migration file downloaded: ${fileName} (${documents.length} documents)`);
+    return { ok: true, fileName, text, payload };
+  } catch (error) {
+    console.error("[TextForge migration] export failed", error);
+    setSessionText(`V2 migration failed: ${error?.message || "unknown error"}`);
+    return { ok: false, reason: error?.message || "Migration export failed." };
+  }
+}
+
 async function exportDocument(request = {}) {
   flushRichDocumentNow("before-export");
   flushReferenceDocumentNow("before-export");
@@ -5662,6 +5703,7 @@ els.splitDivider?.addEventListener("keydown", (event) => {
 });
 els.inspectorToggleBtn?.addEventListener("click", () => setInspectorOpen(!inspectorOpen || inspectorTab !== "context", "context"));
 els.topForgeSnapshotBtn?.addEventListener("click", openForgeSnapshotPanel);
+els.v2MigrationBtn?.addEventListener("click", exportV2Migration);
 els.quickNoteBtn?.addEventListener("click", () => openMacintoshSurface("openQuickNote"));
 els.exportStudioBtn?.addEventListener("click", () => openMacintoshSurface("openExportStudio"));
 els.versionsBtn?.addEventListener("click", () => openMacintoshSurface("openVersions"));
