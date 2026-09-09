@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#202328" />
+    <title>전체 문서함 - TextForge</title>
+    <script>
+      (() => {
+        const stored = localStorage.getItem("textforge.theme") || "system";
+        const system = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.dataset.theme = stored === "light" || stored === "dark" ? stored : system;
+      })();
+    </script>
+    <link rel="icon" href="TextForge.ico" sizes="any" />
+    <link rel="stylesheet" href="portal-library.css" />
+  </head>
+  <body>
+    <main class="portal-shell" aria-label="TextForge 전체 문서함">
+      <header class="portal-toolbar">
+        <div class="portal-brand" aria-label="TextForge 전체 문서함">
+          <img src="TextForge.ico" alt="" />
+          <div>
+            <strong>전체 문서함</strong>
+            <span id="connectionText">TextForge 연결 중</span>
+          </div>
+        </div>
+
+        <nav class="portal-history" aria-label="위치 이동">
+          <button id="backBtn" class="icon-button" type="button" title="뒤로" aria-label="뒤로">←</button>
+          <button id="forwardBtn" class="icon-button" type="button" title="앞으로" aria-label="앞으로">→</button>
+          <button id="upBtn" class="icon-button" type="button" title="상위 폴더" aria-label="상위 폴더">↑</button>
+        </nav>
+
+        <label class="portal-search">
+          <span aria-hidden="true">⌕</span>
+          <input id="searchInput" type="search" placeholder="문서, 태그, 미리보기 검색" autocomplete="off" aria-label="문서 검색" />
+        </label>
+
+        <div class="portal-toolbar-actions">
+          <select id="sortSelect" aria-label="문서 정렬">
+            <option value="updated">최근 수정</option>
+            <option value="created">최근 생성</option>
+            <option value="title">제목</option>
+            <option value="favorite">즐겨찾기</option>
+            <option value="chars">글자 수</option>
+          </select>
+          <div class="segmented-control" aria-label="보기 방식">
+            <button id="gridBtn" class="active" type="button" title="격자 보기" aria-label="격자 보기" aria-pressed="true">▦</button>
+            <button id="listBtn" type="button" title="목록 보기" aria-label="목록 보기" aria-pressed="false">☷</button>
+          </div>
+          <button id="quickNoteBtn" type="button">Quick Note</button>
+          <button id="newFolderBtn" type="button">새 폴더</button>
+        </div>
+      </header>
+
+      <div class="portal-layout">
+        <aside class="portal-sidebar" aria-label="Portal 위치와 필터">
+          <section>
+            <h2>라이브러리</h2>
+            <button class="portal-nav active" data-smart-folder="all" type="button"><span>전체 문서</span><b id="allCount">0</b></button>
+            <button class="portal-nav" data-smart-folder="inbox" type="button"><span>Inbox</span><b id="inboxCount">0</b></button>
+            <button class="portal-nav" data-smart-folder="recent" type="button"><span>최근 문서</span></button>
+            <button class="portal-nav" data-smart-folder="favorites" type="button"><span>즐겨찾기</span></button>
+          </section>
+
+          <section>
+            <h2>스마트 폴더</h2>
+            <button class="portal-nav" data-smart-folder="week" type="button"><span>이번 주 작성</span></button>
+            <button class="portal-nav" data-smart-folder="long" type="button"><span>장문</span></button>
+            <button class="portal-nav" data-smart-folder="untitled" type="button"><span>제목 없음</span></button>
+            <button class="portal-nav" data-smart-folder="unfiled" type="button"><span>미분류</span></button>
+            <button class="portal-nav" data-smart-folder="recovery" type="button"><span>복구 스냅샷 있음</span></button>
+          </section>
+
+          <section class="folder-section">
+            <div class="section-heading">
+              <h2>폴더</h2>
+              <button id="sidebarNewFolderBtn" class="mini-icon" type="button" title="새 폴더" aria-label="새 폴더">＋</button>
+            </div>
+            <div id="folderTree" class="folder-tree" role="tree" aria-label="폴더"></div>
+          </section>
+
+          <section>
+            <div class="section-heading">
+              <h2>컬렉션</h2>
+              <button id="newCollectionBtn" class="mini-icon" type="button" title="새 컬렉션" aria-label="새 컬렉션">＋</button>
+            </div>
+            <div id="collectionList" class="collection-list"></div>
+          </section>
+
+          <button class="portal-nav danger" data-smart-folder="trash" type="button"><span>휴지통</span><b id="trashCount">0</b></button>
+        </aside>
+
+        <section class="portal-content" aria-label="문서 탐색">
+          <div class="portal-pathbar">
+            <nav id="breadcrumbs" class="breadcrumbs" aria-label="현재 위치"></nav>
+            <div class="library-status" aria-live="polite">
+              <span id="resultCount">0개</span>
+              <span id="activeDocumentText">선택된 문서 없음</span>
+            </div>
+          </div>
+
+          <div id="selectionBar" class="selection-bar hidden" aria-live="polite">
+            <strong id="selectionText">0개 선택</strong>
+            <button id="favoriteSelectionBtn" type="button">즐겨찾기 전환</button>
+            <button id="moveSelectionBtn" type="button">폴더로 이동</button>
+            <button id="collectionSelectionBtn" type="button">컬렉션에 추가</button>
+            <button id="trashSelectionBtn" class="danger" type="button">휴지통</button>
+            <button id="clearSelectionBtn" type="button">선택 해제</button>
+          </div>
+
+          <div id="dropRoot" class="root-drop-target" tabindex="-1">여기에 놓아 루트로 이동</div>
+          <div id="librarySurface" class="library-surface grid-view" role="listbox" aria-multiselectable="true" tabindex="0"></div>
+          <div id="emptyState" class="empty-state hidden">
+            <strong>표시할 문서가 없습니다</strong>
+            <span>검색어나 현재 위치를 바꿔보세요.</span>
+          </div>
+        </section>
+      </div>
+
+      <footer class="portal-statusbar">
+        <span id="statusText">준비 중</span>
+        <span>로컬 문서함</span>
+      </footer>
+    </main>
+
+    <dialog id="moveDialog" class="portal-dialog" aria-labelledby="moveDialogTitle">
+      <form method="dialog" id="moveForm">
+        <div class="dialog-heading">
+          <div>
+            <span>Organize</span>
+            <h2 id="moveDialogTitle">폴더로 이동</h2>
+          </div>
+          <button class="icon-button" value="cancel" type="submit" aria-label="닫기">×</button>
+        </div>
+        <label>대상 폴더 <select id="moveFolderSelect"></select></label>
+        <div class="dialog-actions">
+          <button value="cancel" type="submit">취소</button>
+          <button class="primary" value="default" type="submit">이동</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="quickLookDialog" class="quicklook-dialog" aria-labelledby="quickLookTitle">
+      <div class="quicklook-shell">
+        <header>
+          <div>
+            <span id="quickLookMeta"></span>
+            <h2 id="quickLookTitle">빠른 보기</h2>
+          </div>
+          <div class="quicklook-actions">
+            <label class="quicklook-search">⌕ <input id="quickLookSearch" type="search" placeholder="미리보기에서 찾기" aria-label="미리보기에서 찾기" /></label>
+            <button id="quickLookPrevMatch" class="icon-button" type="button" aria-label="이전 검색 결과">&#8593;</button>
+            <span id="quickLookMatchStatus" aria-live="polite">0 / 0</span>
+            <button id="quickLookNextMatch" class="icon-button" type="button" aria-label="다음 검색 결과">&#8595;</button>
+            <button id="quickLookOpenBtn" type="button">편집기에서 열기</button>
+            <button id="quickLookCloseBtn" class="icon-button" type="button" aria-label="닫기">×</button>
+          </div>
+        </header>
+        <article id="quickLookContent" class="quicklook-content" tabindex="0"></article>
+      </div>
+    </dialog>
+
+    <div id="contextMenu" class="context-menu hidden" role="menu">
+      <button data-action="open" role="menuitem" type="button">편집기에서 열기</button>
+      <button data-action="quicklook" role="menuitem" type="button">빠른 보기</button>
+      <button data-action="rename" role="menuitem" type="button">이름 변경</button>
+      <button data-action="favorite" role="menuitem" type="button">즐겨찾기 전환</button>
+      <button data-action="collection" role="menuitem" type="button">컬렉션에 추가</button>
+      <button data-action="trash" class="danger" role="menuitem" type="button">휴지통으로 이동</button>
+    </div>
+
+    <div id="toast" class="toast hidden" role="status" aria-live="polite">
+      <span id="toastText"></span>
+      <button id="toastUndoBtn" class="hidden" type="button">실행 취소</button>
+    </div>
+
+    <script src="portal-library-core.js"></script>
+    <script src="portal-library.js"></script>
+  </body>
+</html>

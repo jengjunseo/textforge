@@ -1,11 +1,22 @@
 {
   "name": "textforge",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Local-first rich text document workspace",
   "scripts": {
     "start": "node dev-server.js",
-    "check": "node --check app.js && node --check forge-snapshot.js && node --check textforge-diagnostics.js"
+    "test": "node tests/textforge-regression.cjs",
+    "test:browser": "node tests/browser-smoke.cjs http://127.0.0.1:4291",
+    "test:mac-part2": "node tests/macintosh-part2-regression.cjs",
+    "test:mac-part2:browser": "node tests/macintosh-part2-browser-smoke.cjs http://127.0.0.1:4291",
+    "test:mac-part3": "node tests/macintosh-part3-regression.cjs",
+    "test:mac-part3:browser": "node tests/macintosh-part3-browser-smoke.cjs http://localhost:4291",
+    "test:mac-part31": "node tests/macintosh-part31-regression.cjs",
+    "test:mac-part31:browser": "node tests/macintosh-part31-browser-smoke.cjs http://localhost:4291",
+    "test:mac-part4": "node tests/macintosh-part4-regression.cjs",
+    "test:diet-surface": "node tests/macintosh-surface-cleanup-regression.cjs",
+    "benchmark:portal": "node tests/portal-library-benchmark.cjs",
+    "check": "node --check app.js && node --check forge-snapshot.js && node --check textforge-diagnostics.js && node --check portal-library-core.js && node --check portal-library.js && node --check dev-server.js && node tests/textforge-regression.cjs && node tests/portal-library-benchmark.cjs"
   },
   "license": "UNLICENSED"
 }

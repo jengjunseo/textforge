@@ -1,88 +1,33 @@
-# TextForge
+# TextForge v1.0 Local
 
-TextForge is a local-first rich text document workspace for fast writing, clean output, and portable archives.
+TextForge는 서버, 계정, 클라우드 동기화 없이 브라우저 프로필에 문서를 저장하는 로컬 우선 Rich Text 문서 작업공간입니다.
 
-> Rich formatting while writing. Clean output when sharing.
+> 서식은 풍부하게, 출력은 깨끗하게.
 
-## Principles
+## 실행
 
-- No server requirement
-- No account requirement
-- No cloud sync requirement
-- Local storage first
-- Fast document writing
-- Strong source document protection
-
-## Current Highlights
-
-- Rich text editing
-- Write, Source, Preview, and Split views
-- Finder-style document library
-- Tags, folders, favorites, search, and sort
-- Smart Copy: Plain, Rich, Markdown, and Board
-- Export: TXT, MD, HTML, PDF, DOC, EPUB, and PNG Card
-- Document history snapshots
-- Prompt Vault
-- Table of contents, document links, and backlinks
-- Light and dark themes
-- Forge Snapshot read-only HTML archives
-- Diagnostics and benchmark tools
-- PWA manifest and app-mode launch helpers
-- Focus Mode with adjustable writing width
-- Long document typing fast sync
-- Display-only word wrap
-- Safety Snapshot and bulk undo/redo
-- AI cleanup that preserves the original document
-
-## Run Locally
-
-```bash
-npm start
+```powershell
+npm.cmd start
 ```
 
-Then open:
+브라우저 주소:
 
 ```txt
 http://127.0.0.1:4291
 ```
 
-You can also run the static server directly:
+Windows app mode는 `Start TextForge.cmd`로 실행할 수 있습니다.
 
-```bash
-node dev-server.js
-```
+## 프로젝트 브리핑
 
-On Windows, app-mode launch helpers are available:
+현재 구현, 아키텍처, 안전 계약, 동결 영역, 남은 한계와 다음 개발 시작점은 다음 단일 문서를 기준으로 합니다.
 
-```txt
-Start TextForge.cmd
-launch-textforge-app.bat
-```
+- [텍스트포지 프로젝트 브리핑](docs/%ED%85%8D%EC%8A%A4%ED%8A%B8%ED%8F%AC%EC%A7%80%20%EB%B8%8C%EB%A6%AC%ED%95%91.md)
 
-## Checks
+## 확인
 
-```bash
-npm run check
-```
-
-If PowerShell blocks `npm.ps1`, use:
-
-```bash
+```powershell
 npm.cmd run check
 ```
 
-## Project Docs
-
-- [Project Overview](docs/TEXTFORGE_PROJECT_OVERVIEW.md)
-- [Architecture](docs/TEXTFORGE_ARCHITECTURE.md)
-- [File Dependency Map](docs/TEXTFORGE_FILE_DEPENDENCY_MAP.md)
-- [Developer Guide](docs/TEXTFORGE_DEV_GUIDE.md)
-- [Safety And Recovery](docs/TEXTFORGE_SAFETY_AND_RECOVERY.md)
-- [Feature History](docs/TEXTFORGE_FEATURE_HISTORY.md)
-- [Next Steps](docs/TEXTFORGE_NEXT_STEPS.md)
-
-## Important Local-First Note
-
-TextForge stores documents in the browser profile's localStorage / IndexedDB. The repository contains the app code, not user documents.
-
-For user document backup, use Forge Snapshot, Export, or browser profile backup. Do not assume a Git commit backs up the user's document library.
+실제 사용자 문서는 repository가 아니라 브라우저 프로필의 localStorage/IndexedDB에 있습니다. Git commit이나 소스 백업은 사용자 문서 백업이 아니며, 문서 보존에는 Forge Snapshot, Export 또는 브라우저 프로필 백업을 사용해야 합니다.

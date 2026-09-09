@@ -1,0 +1,63 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --surface-2: #edf1f4;
+  --text: #17212b;
+  --muted: #617080;
+  --border: #cdd5dc;
+  --accent: #167c80;
+  --accent-soft: #dcefee;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #171a1d;
+    --surface: #202428;
+    --surface-2: #292e33;
+    --text: #eef2f4;
+    --muted: #a6b0b8;
+    --border: #414950;
+    --accent: #60c0bd;
+    --accent-soft: #213f40;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { width: 100%; height: 100%; margin: 0; }
+body { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; overflow: hidden; color: var(--text); background: var(--bg); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; }
+button, input, textarea { color: inherit; font: inherit; }
+button { min-height: 30px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); cursor: pointer; }
+button:hover { background: var(--surface-2); }
+button:focus-visible, input:focus-visible, textarea:focus-visible, [contenteditable="true"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hidden { display: none !important; }
+.detached-titlebar, .detached-toolbar, .detached-statusbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.detached-titlebar { justify-content: space-between; min-width: 0; }
+.detached-title-group, .detached-window-actions { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.detached-title-group { flex: 1; }
+.detached-product { color: var(--accent); font-size: 12px; font-weight: 700; }
+#detachedTitle { width: min(620px, 100%); min-width: 120px; padding: 5px 7px; border: 1px solid transparent; border-radius: 4px; background: transparent; font-size: 15px; font-weight: 650; }
+#detachedTitle:hover, #detachedTitle:focus { border-color: var(--border); background: var(--surface-2); }
+.connection-state { padding: 3px 7px; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.connection-state.connected { border-color: var(--accent); color: var(--accent); }
+.connection-state.disconnected { color: #b24f3f; }
+.detached-toolbar { min-height: 44px; }
+.detached-toolbar button { min-width: 32px; padding: 4px 8px; }
+.segmented { display: inline-flex; }
+.segmented button { border-radius: 0; }
+.segmented button:first-child { border-radius: 5px 0 0 5px; }
+.segmented button:last-child { border-radius: 0 5px 5px 0; }
+.segmented button + button { margin-left: -1px; }
+.segmented button[aria-pressed="true"] { position: relative; border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.toolbar-separator { width: 1px; height: 24px; background: var(--border); }
+.detached-editor-shell { display: grid; min-width: 0; min-height: 0; overflow: hidden; background: var(--surface); }
+.detached-editor-shell > * { grid-area: 1 / 1; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: auto; }
+.detached-rich-editor, .detached-source-editor, .detached-preview { max-width: none; margin: 0; padding: 34px max(28px, calc((100vw - 860px) / 2)); border: 0; background: var(--surface); color: var(--text); font-size: 17px; line-height: 1.7; }
+.detached-rich-editor[contenteditable="false"], .detached-source-editor[readonly] { background: var(--surface-2); }
+.detached-source-editor { resize: none; font-family: ui-monospace, Consolas, monospace; font-size: 14px; line-height: 1.6; }
+.detached-rich-editor img, .detached-preview img { max-width: 100%; height: auto; }
+.detached-rich-editor table, .detached-preview table { border-collapse: collapse; }
+.detached-rich-editor td, .detached-rich-editor th, .detached-preview td, .detached-preview th { padding: 6px 8px; border: 1px solid var(--border); }
+.detached-statusbar { justify-content: space-between; border-top: 1px solid var(--border); border-bottom: 0; color: var(--muted); font-size: 11px; }
+@media (max-width: 620px) { .detached-titlebar { align-items: stretch; flex-direction: column; } .detached-window-actions { justify-content: space-between; } .detached-toolbar { overflow-x: auto; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 1ms !important; } }

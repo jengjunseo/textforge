@@ -325,6 +325,7 @@ html[data-theme=dark]{--bg-app:#1b1d21;--bg-surface:#23262b;--bg-surface-2:#2a2e
 
   window.ForgeSnapshot = {
     openForgeSnapshotDialog,
+    closeForgeSnapshotDialog,
     collectSnapshotDocuments,
     buildSnapshotData,
     sanitizeSnapshotHtml,

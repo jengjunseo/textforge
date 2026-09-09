@@ -8,6 +8,10 @@ const SPLIT_WORKSPACE_KEY = "textforge.splitWorkspace";
 const FOCUS_MODE_KEY = "textforge.focusMode";
 const FOCUS_WIDTH_KEY = "textforge.focusCanvasWidth";
 const WORD_WRAP_KEY = "textforge.wordWrap";
+const PORTAL_CHANNEL_NAME = "textforge.portal-library.v1";
+const DETACHED_CHANNEL_NAME = "textforge.detached-editor.v1";
+const UNIVERSAL_COMMAND_KEY = "textforge.universalCommand.v1";
+const QUICK_NOTE_OPERATION_KEY = "textforge.quickNoteOperations.v1";
 const DB_NAME = "textforge-personal-storage";
 const DB_VERSION = 1;
 const STORAGE_POINTER_KEY = "textforge.pointer.v2";
@@ -16,7 +20,6 @@ const LONG_LINE_LIMIT = 8000;
 const AUTO_SNAPSHOT_INTERVAL = 90000;
 const CARD_WIDTH = 1200;
 const CARD_HEIGHT = 675;
-const FINDER_PAGE_SIZE = 24;
 const FOCUS_WIDTH_DEFAULT = 860;
 const FOCUS_WIDTH_MIN = 640;
 const FOCUS_WIDTH_MAX = 1200;
@@ -41,10 +44,17 @@ const DEFAULT_PROMPTS = [
   },
 ];
 
+let activeTypingTrace = null;
+let formatDebugEnabled = localStorage.getItem("textforge.formatDebug") === "true";
+let formatDebugBuffer = [];
+
 const els = {
   docList: document.querySelector("#docList"),
   newDocBtn: document.querySelector("#newDocBtn"),
   searchInput: document.querySelector("#searchInput"),
+  sidebarFavoritesBtn: document.querySelector("#sidebarFavoritesBtn"),
+  sidebarFoldersBtn: document.querySelector("#sidebarFoldersBtn"),
+  sidebarToggleBtn: document.querySelector("#sidebarToggleBtn"),
   titleInput: document.querySelector("#titleInput"),
   saveState: document.querySelector("#saveState"),
   editor: document.querySelector("#editor"),
@@ -54,17 +64,12 @@ const els = {
   preview: document.querySelector("#preview"),
   editorGrid: document.querySelector("#editorGrid"),
   editorPaneLabel: document.querySelector("#editorPaneLabel"),
+  mainPaneQuickLookBtn: document.querySelector("#mainPaneQuickLookBtn"),
   statsText: document.querySelector("#statsText"),
   copyState: document.querySelector("#copyState"),
   guardBanner: document.querySelector("#guardBanner"),
   guardText: document.querySelector("#guardText"),
-  wrapToggleBtn: document.querySelector("#wrapToggleBtn"),
   breakLineBtn: document.querySelector("#breakLineBtn"),
-  exportTxtBtn: document.querySelector("#exportTxtBtn"),
-  exportMdBtn: document.querySelector("#exportMdBtn"),
-  exportHtmlBtn: document.querySelector("#exportHtmlBtn"),
-  exportPdfBtn: document.querySelector("#exportPdfBtn"),
-  recoverBtn: document.querySelector("#recoverBtn"),
   sessionText: document.querySelector("#sessionText"),
   cleanOutputBtn: document.querySelector("#cleanOutputBtn"),
   copyPlainBtn: document.querySelector("#copyPlainBtn"),
@@ -74,11 +79,6 @@ const els = {
   themeSelect: document.querySelector("#themeSelect"),
   appThemeSelect: document.querySelector("#appThemeSelect"),
   styleSelect: document.querySelector("#styleSelect"),
-  fontSelect: document.querySelector("#fontSelect"),
-  sizeSelect: document.querySelector("#sizeSelect"),
-  colorInput: document.querySelector("#colorInput"),
-  bgInput: document.querySelector("#bgInput"),
-  clearFormatBtn: document.querySelector("#clearFormatBtn"),
   linkBtn: document.querySelector("#linkBtn"),
   imageBtn: document.querySelector("#imageBtn"),
   tableBtn: document.querySelector("#tableBtn"),
@@ -94,25 +94,28 @@ const els = {
   insertPromptBtn: document.querySelector("#insertPromptBtn"),
   copyPromptBtn: document.querySelector("#copyPromptBtn"),
   savePromptBtn: document.querySelector("#savePromptBtn"),
-  exportDocBtn: document.querySelector("#exportDocBtn"),
-  exportEpubBtn: document.querySelector("#exportEpubBtn"),
-  exportCardBtn: document.querySelector("#exportCardBtn"),
   systemList: document.querySelector("#systemList"),
   docInfoList: document.querySelector("#docInfoList"),
-  logModeBtn: document.querySelector("#logModeBtn"),
   commandBtn: document.querySelector("#commandBtn"),
   focusModeBtn: document.querySelector("#focusModeBtn"),
   commandOverlay: document.querySelector("#commandOverlay"),
   commandInput: document.querySelector("#commandInput"),
   commandList: document.querySelector("#commandList"),
-  viewModeSelect: document.querySelector("#viewModeSelect"),
-  workModeSelect: document.querySelector("#workModeSelect"),
+  quickNoteBtn: document.querySelector("#quickNoteBtn"),
+  exportStudioBtn: document.querySelector("#exportStudioBtn"),
+  versionsBtn: document.querySelector("#versionsBtn"),
+  documentInfoBtn: document.querySelector("#documentInfoBtn"),
+  sourceModeBtn: document.querySelector("#sourceModeBtn"),
+  duplicateDocBtn: document.querySelector("#duplicateDocBtn"),
+  trashDocBtn: document.querySelector("#trashDocBtn"),
+  workspaceBtn: document.querySelector("#workspaceBtn"),
+  detachedEditorBtn: document.querySelector("#detachedEditorBtn"),
+  moreLibraryBtn: document.querySelector("#moreLibraryBtn"),
+  tocToolsBtn: document.querySelector("#tocToolsBtn"),
+  promptToolsBtn: document.querySelector("#promptToolsBtn"),
+  systemToolsBtn: document.querySelector("#systemToolsBtn"),
   inspectorToggleBtn: document.querySelector("#inspectorToggleBtn"),
   topForgeSnapshotBtn: document.querySelector("#topForgeSnapshotBtn"),
-  footerForgeSnapshotBtn: document.querySelector("#footerForgeSnapshotBtn"),
-  topRecoverBtn: document.querySelector("#topRecoverBtn"),
-  topLogModeBtn: document.querySelector("#topLogModeBtn"),
-  diagnosticsOpenBtn: document.querySelector("#diagnosticsOpenBtn"),
   splitSingleBtn: document.querySelector("#splitSingleBtn"),
   splitVerticalBtn: document.querySelector("#splitVerticalBtn"),
   splitHorizontalBtn: document.querySelector("#splitHorizontalBtn"),
@@ -121,43 +124,22 @@ const els = {
   splitSyncBtn: document.querySelector("#splitSyncBtn"),
   referencePane: document.querySelector("#referencePane"),
   referencePaneTitle: document.querySelector("#referencePaneTitle"),
+  referencePaneQuickLookBtn: document.querySelector("#referencePaneQuickLookBtn"),
   referencePaneMode: document.querySelector("#referencePaneMode"),
   referencePaneBody: document.querySelector("#referencePaneBody"),
+  referenceSourceEditor: document.querySelector("#referenceSourceEditor"),
+  referencePreview: document.querySelector("#referencePreview"),
+  referencePaneStatus: document.querySelector("#referencePaneStatus"),
+  splitDivider: document.querySelector("#splitDivider"),
+  referenceSwapBtn: document.querySelector("#referenceSwapBtn"),
   referenceScrollLockBtn: document.querySelector("#referenceScrollLockBtn"),
   referenceSyncBtn: document.querySelector("#referenceSyncBtn"),
   referenceDocSelect: document.querySelector("#referenceDocSelect"),
   referenceCloseBtn: document.querySelector("#referenceCloseBtn"),
-  footerHistoryBtn: document.querySelector("#footerHistoryBtn"),
-  footerSnapshotBtn: document.querySelector("#footerSnapshotBtn"),
   contentArea: document.querySelector(".content-area"),
   inspector: document.querySelector(".inspector"),
   appShell: document.querySelector(".app-shell"),
-  finderOpenBtn: document.querySelector("#finderOpenBtn"),
-  finderView: document.querySelector("#finderView"),
-  finderCloseBtn: document.querySelector("#finderCloseBtn"),
-  finderSearchInput: document.querySelector("#finderSearchInput"),
-  finderSortSelect: document.querySelector("#finderSortSelect"),
-  finderGridBtn: document.querySelector("#finderGridBtn"),
-  finderListBtn: document.querySelector("#finderListBtn"),
-  finderSelectBtn: document.querySelector("#finderSelectBtn"),
-  forgeSnapshotBtn: document.querySelector("#forgeSnapshotBtn"),
-  finderNewDocBtn: document.querySelector("#finderNewDocBtn"),
-  finderNewFolderBtn: document.querySelector("#finderNewFolderBtn"),
-  finderGrid: document.querySelector("#finderGrid"),
-  finderPrevBtn: document.querySelector("#finderPrevBtn"),
-  finderNextBtn: document.querySelector("#finderNextBtn"),
-  finderPageText: document.querySelector("#finderPageText"),
-  finderBulkBar: document.querySelector("#finderBulkBar"),
-  finderSelectionCount: document.querySelector("#finderSelectionCount"),
-  finderBulkFolderSelect: document.querySelector("#finderBulkFolderSelect"),
-  finderBulkMoveBtn: document.querySelector("#finderBulkMoveBtn"),
-  finderBulkTrashBtn: document.querySelector("#finderBulkTrashBtn"),
-  finderBulkCancelBtn: document.querySelector("#finderBulkCancelBtn"),
-  finderTagList: document.querySelector("#finderTagList"),
-  finderFolderList: document.querySelector("#finderFolderList"),
-  finderCrumbs: document.querySelector("#finderCrumbs"),
-  finderAllCount: document.querySelector("#finderAllCount"),
-  docContextMenu: document.querySelector("#docContextMenu"),
+  portalLibraryBtn: document.querySelector("#portalLibraryBtn"),
 };
 
 let documents = normalizeDocuments(loadDocuments());
@@ -178,20 +160,6 @@ let uiMode = localStorage.getItem("textforge.uiMode") || "pro";
 let focusMode = localStorage.getItem(FOCUS_MODE_KEY) === "true";
 let focusCanvasWidth = Number(localStorage.getItem(FOCUS_WIDTH_KEY)) || FOCUS_WIDTH_DEFAULT;
 let wordWrapEnabled = localStorage.getItem(WORD_WRAP_KEY) !== "false";
-let finderState = {
-  query: "",
-  sort: "updated",
-  filter: "all",
-  tag: null,
-  folderId: null,
-  view: "grid",
-  page: 0,
-  pageSize: FINDER_PAGE_SIZE,
-  selecting: false,
-  selectedIds: new Set(),
-  contextDocId: null,
-};
-let finderSearchTimer = null;
 let splitWorkspace = loadSplitWorkspace();
 let referenceRenderTimer = null;
 let postSwitchRenderTimer = null;
@@ -200,27 +168,46 @@ let splitWorkspaceRenderTimer = null;
 let richFullSyncTimer = null;
 let previewUpdateTimer = null;
 let statsUpdateTimer = null;
+let sessionStateTimer = null;
 let richDocumentDirty = false;
+let referenceDocumentDirty = false;
+let referenceDirtyDocumentId = null;
+let referenceFullSyncTimer = null;
+let referenceCompositionActive = false;
 let compositionActive = false;
 let savedEditorSelection = null;
+let startupResumeFocusApplied = false;
 let pendingTypingStyle = {};
-let formatDebugEnabled = localStorage.getItem("textforge.formatDebug") === "true";
-let formatDebugBuffer = [];
 let typingDebugEnabled = localStorage.getItem("textforge.typingDebug") === "true";
 let typingDebugBuffer = [];
-let activeTypingTrace = null;
 let typingTraceSequence = 0;
 let typingLongTaskObserver = null;
 let typingLongTaskEntries = [];
 let bulkUndoStack = [];
 let bulkRedoStack = [];
 let bulkUndoPending = false;
+let experienceSelectionLease = null;
+let experienceOperationUndoStack = [];
 let paneScrollSyncing = false;
 let lockedReferenceGuard = null;
 let splitScrollDriftWarned = false;
 let activeDocumentSwitchTrace = null;
 let lastDocumentSwitchTrace = null;
 let documentSwitchBenchmarkResult = null;
+let portalLibraryWindow = null;
+let portalLibraryChannel = null;
+let detachedEditorChannel = null;
+let detachedEditorHeartbeatTimer = null;
+const detachedEditorLeases = new Map();
+const detachedSeenRequestIds = new Set();
+let portalLibraryConnected = false;
+let portalStateBroadcastTimer = null;
+let portalOperationUndoStack = [];
+let universalCommandResults = [];
+let universalCommandIndex = 0;
+let universalCommandComposing = false;
+let universalCommandReturnFocus = null;
+const portalSeenRequestIds = new Set();
 
 installFormatDebugApi();
 installTypingDebugApi();
@@ -253,6 +240,7 @@ function setTheme(theme) {
   const next = theme === "light" || theme === "dark" || theme === "system" ? theme : "system";
   localStorage.setItem(THEME_KEY, next);
   applyTheme(next);
+  schedulePortalStateBroadcast(0);
 }
 
 function toggleTheme() {
@@ -1058,36 +1046,37 @@ function setRichEditorHtmlPrepared(html) {
 }
 
 const COMMANDS = [
+  { id: "portal-library", title: "전체 문서함 열기", hint: "별도 창에서 문서와 폴더를 탐색하고 정리", run: openPortalLibrary },
   { id: "copy-plain", title: "Plain Copy", hint: "Markdown 기호를 제거해 복사", run: () => copyAs("plain") },
   { id: "copy-rich", title: "Rich Copy", hint: "HTML 서식을 유지해 복사", run: () => copyAs("rich") },
   { id: "copy-markdown", title: "Markdown Copy", hint: "Markdown 원문 복사", run: () => copyAs("markdown") },
   { id: "copy-board", title: "Board Copy", hint: "게시판용 텍스트 복사", run: () => copyAs("board") },
-  { id: "view-source", title: "원문 보기", hint: "Markdown Source 보기", run: () => setMode("source") },
+  { id: "view-source", title: "소스 편집", hint: "Markdown 원문 편집", run: () => setMode("source") },
   { id: "view-preview", title: "미리보기", hint: "Clean Preview 보기", run: () => setMode("clean") },
   { id: "view-split", title: "분할 보기", hint: "작성과 미리보기를 함께 표시", run: () => setMode("split") },
-  { id: "export-txt", title: "TXT Export", hint: "일반 텍스트 파일 내보내기", run: () => exportFile("txt") },
-  { id: "export-pdf", title: "PDF Export", hint: "프린트 화면으로 PDF 내보내기", run: () => exportFile("pdf") },
   { id: "clean-paste", title: "Clean Paste", hint: "클립보드 텍스트를 정리해 붙여넣기", run: cleanPaste },
   { id: "tidy-ai", title: "AI 출력 정리", hint: "과한 서식과 Markdown 정리", run: cleanAiOutput },
   { id: "snapshot", title: "수동 스냅샷", hint: "현재 문서 상태를 저장", run: saveManualSnapshot },
   { id: "recover-session", title: "세션 복구", hint: "이전에 저장된 세션 복구", run: recoverSession },
   { id: "inspector-open", title: "Inspector 열기", hint: "우측 검사기 패널 열기", run: () => setInspectorOpen(true, "toc") },
-  { id: "history-open", title: "히스토리 열기", hint: "문서 스냅샷 보기", run: () => setInspectorOpen(true, "history") },
+  { id: "history-open", title: "보호본 보기", hint: "문서 보호본 보기", run: () => setInspectorOpen(true, "history") },
   { id: "prompt-open", title: "Prompt Vault 열기", hint: "프롬프트 보관함 보기", run: () => setInspectorOpen(true, "prompt") },
-  { id: "system-open", title: "시스템 패널 열기", hint: "시스템 상태 보기", run: () => setInspectorOpen(true, "system") },
-  { id: "log-mode", title: "로그 모드 전환", hint: "긴 줄 보호 모드 전환", run: toggleLogMode },
+  { id: "system-open", title: "문서 도구 열기", hint: "문서 상태와 연결 정보 보기", run: () => setInspectorOpen(true, "system") },
+  { id: "log-mode", title: "로그 모드 전환", hint: "긴 줄 보호 모드 전환", labOnly: true, run: toggleLogMode },
   { id: "theme-toggle", title: "테마 전환", hint: "라이트/다크 테마 전환", run: toggleTheme },
   { id: "focus-mode-toggle", title: "집중 모드 전환", hint: "보조 UI를 접고 본문 공간 넓히기", run: toggleFocusMode },
-  { id: "ui-mode", title: "UI 모드 전환", hint: "Simple / Pro / Lab 모드 전환", run: () => setUiMode(uiMode === "lab" ? "simple" : uiMode === "simple" ? "pro" : "lab") },
-  { id: "forge-snapshot", title: "Forge Snapshot 만들기", hint: "문서함을 읽기 전용 HTML 아카이브로 내보내기", run: openForgeSnapshotPanel },
-  { id: "diagnostics-open", title: "진단 패널 열기", hint: "성능/신뢰성 벤치마크 보기", run: openDiagnosticsPanel },
-  { id: "diagnostics-quick", title: "빠른 벤치마크 실행", hint: "핵심 지표를 빠르게 측정", run: () => openDiagnosticsPanel().then(() => window.TextForgeDiagnostics?.runQuickBenchmark()) },
+  { id: "ui-mode", title: "UI 모드 전환", hint: "Simple / Pro / Lab 모드 전환", labOnly: true, run: () => setUiMode(uiMode === "lab" ? "simple" : uiMode === "simple" ? "pro" : "lab") },
+  { id: "forge-snapshot", title: "문서함 백업", hint: "문서함을 읽기 전용 HTML 아카이브로 내보내기", run: openForgeSnapshotPanel },
+  { id: "diagnostics-open", title: "진단 패널 열기", hint: "성능/신뢰성 벤치마크 보기", labOnly: true, run: openDiagnosticsPanel },
+  { id: "diagnostics-quick", title: "빠른 벤치마크 실행", hint: "핵심 지표를 빠르게 측정", labOnly: true, run: () => openDiagnosticsPanel().then(() => window.TextForgeDiagnostics?.runQuickBenchmark()) },
   { id: "diagnostics-full", title: "전체 벤치마크 실행", hint: "더미 문서 100개 memory-only 테스트", labOnly: true, run: () => openDiagnosticsPanel().then(() => window.TextForgeDiagnostics?.runFullBenchmark()) },
   { id: "diagnostics-reliability", title: "신뢰성 반복 테스트", hint: "반복 작업 100회 MTBF-like 측정", labOnly: true, run: () => openDiagnosticsPanel().then(() => window.TextForgeDiagnostics?.runReliabilityTest()) },
   { id: "diagnostics-snapshot", title: "Forge Snapshot 벤치마크", hint: "Snapshot HTML build 성능 측정", labOnly: true, run: () => openDiagnosticsPanel().then(() => window.TextForgeDiagnostics?.runSnapshotBenchmark()) },
-  { id: "diagnostics-export", title: "진단 결과 JSON 내보내기", hint: "최근 벤치마크 결과 저장", run: () => window.TextForgeDiagnostics?.exportBenchmarkJson() },
-  { id: "diagnostics-real-library", title: "실제 문서함 벤치마크", hint: "실제 문서함 read-only clone으로 측정", run: () => openDiagnosticsPanel().then(() => window.TextForgeDiagnostics?.runRealLibraryBenchmark()) },
+  { id: "diagnostics-export", title: "진단 결과 JSON 내보내기", hint: "최근 벤치마크 결과 저장", labOnly: true, run: () => window.TextForgeDiagnostics?.exportBenchmarkJson() },
+  { id: "diagnostics-real-library", title: "실제 문서함 벤치마크", hint: "실제 문서함 read-only clone으로 측정", labOnly: true, run: () => openDiagnosticsPanel().then(() => window.TextForgeDiagnostics?.runRealLibraryBenchmark()) },
   { id: "diagnostics-mttr", title: "MTTR 복구 테스트", hint: "격리된 장애 주입으로 복구 시간 측정", labOnly: true, run: () => openDiagnosticsPanel().then(() => window.TextForgeDiagnostics?.runMttrBenchmark()) },
+  { id: "diagnostics-writer-readiness", title: "Writer Readiness 실행", hint: "Typing Debug와 현재 문서 쓰기 상태 점검", labOnly: true, run: () => openDiagnosticsPanel().then(() => window.TextForgeDiagnostics?.runWriterReadiness()) },
+  { id: "diagnostics-release-gate", title: "Release Gate 실행", hint: "릴리즈 준비도 v2 종합 점검", labOnly: true, run: () => openDiagnosticsPanel().then(() => window.TextForgeDiagnostics?.runReleaseGate()) },
   { id: "document-switch-benchmark", title: "문서 전환 벤치마크 실행", hint: "문서 클릭 전환 흐름의 단계별 지연 측정", labOnly: true, run: () => runDocumentSwitchBenchmark({ samples: 10 }) },
   { id: "document-switch-trace-show", title: "최근 문서 전환 trace 보기", hint: "최근 전환의 단계별 기록을 console에 표시", labOnly: true, run: showLastDocumentSwitchTrace },
   { id: "document-switch-trace-export", title: "문서 전환 벤치마크 JSON 내보내기", hint: "최근 문서 전환 측정 결과 저장", labOnly: true, run: exportDocumentSwitchBenchmarkJson },
@@ -1096,8 +1085,6 @@ const COMMANDS = [
   { id: "split-horizontal", title: "상하 2분할", hint: "아래쪽에 참고창 열기", run: () => setSplitLayout("horizontal-2") },
   { id: "split-duplicate-reference", title: "현재 문서 참고창 열기", hint: "현재 문서를 읽기 전용 pane으로 열기", run: () => duplicateCurrentDocumentToReferencePane("vertical-2") },
   { id: "split-toggle-scroll-sync", title: "분할 스크롤 동기화 전환", hint: "기본은 끔, 필요할 때만 켜기", run: toggleSplitScrollSync },
-  { id: "export-card", title: "PNG 카드 내보내기", hint: "문서를 이미지로 저장", run: exportCard },
-  { id: "export-epub", title: "EPUB 내보내기", hint: "문서를 XHTML로 패키징", run: () => exportFile("epub") },
   { id: "new-doc", title: "새 문서", hint: "Instant Draft", run: createAndFocusDocument },
 ];
 
@@ -1118,13 +1105,34 @@ COMMANDS.splice(COMMANDS.findIndex((item) => item.id === "split-single"), 0,
   { id: "typing-debug-summary", title: "Typing Latency Summary", hint: "Summarize typing latency samples and slow steps", labOnly: true, run: typingLatencySummary },
 );
 
+function openAdjacentDocument(direction) {
+  const available = documents.filter((doc) => !doc.deletedAt);
+  if (available.length < 2) return;
+  const index = available.findIndex((doc) => doc.id === activeId);
+  const next = available[(Math.max(0, index) + direction + available.length) % available.length];
+  if (next) openDocumentInPane(next.id, "main", { source: "universal-command-adjacent" });
+}
+
+COMMANDS.push(
+  { id: "view-rich", title: "쓰기 보기", hint: "리치 텍스트 편집기로 전환", aliases: ["write", "rich", "편집"], category: "view", run: () => setMode("rich") },
+  { id: "theme-light", title: "라이트 테마", hint: "앱 테마를 밝게 설정", aliases: ["light", "밝게"], category: "settings", run: () => setTheme("light") },
+  { id: "theme-dark", title: "다크 테마", hint: "앱 테마를 어둡게 설정", aliases: ["dark", "어둡게"], category: "settings", run: () => setTheme("dark") },
+  { id: "theme-system", title: "시스템 테마", hint: "Windows 테마 설정을 따름", aliases: ["system", "자동"], category: "settings", run: () => setTheme("system") },
+  { id: "context-inspector-open", title: "선택 Inspector 열기", hint: "현재 caret 또는 선택 항목의 도구 표시", aliases: ["format", "selection", "context"], category: "view", run: () => setInspectorOpen(true, "context") },
+  { id: "context-inspector-close", title: "Inspector 닫기", hint: "현재 Inspector 패널 닫기", aliases: ["hide inspector"], category: "view", enabled: () => inspectorOpen, run: () => setInspectorOpen(false) },
+  { id: "document-previous", title: "이전 문서", hint: "문서 목록의 이전 문서 열기", aliases: ["previous", "prev"], category: "document-command", enabled: () => documents.filter((doc) => !doc.deletedAt).length > 1, run: () => openAdjacentDocument(-1) },
+  { id: "document-next", title: "다음 문서", hint: "문서 목록의 다음 문서 열기", aliases: ["next"], category: "document-command", enabled: () => documents.filter((doc) => !doc.deletedAt).length > 1, run: () => openAdjacentDocument(1) },
+);
+
 if (!documents.length) {
-  const first = createDocument(richSampleText());
+  const first = createDocument("");
   documents = [first];
   activeId = first.id;
   bootstrappedSample = true;
   persistNow();
 }
+
+resolveStartupActiveDocument(readSessionRecoverySnapshot());
 
 function createDocument(content = "") {
   const now = new Date();
@@ -1302,7 +1310,7 @@ function openPersonalDb() {
 async function persistToDurableStorage() {
   if (durableSaveInFlight) {
     scheduleDurableSave();
-    return;
+    return false;
   }
   durableSaveInFlight = true;
   let db = null;
@@ -1337,14 +1345,27 @@ async function persistToDurableStorage() {
     } catch {
       // Ignore local cleanup failures; IndexedDB remains the source of truth.
     }
-    els.sessionText.textContent = "영구 저장소에 저장했습니다.";
+    setSessionText("");
+    return true;
   } catch (error) {
     console.warn("[TextForge] durable save blocked or failed", error);
     els.sessionText.textContent = "안전 장치가 문서함 덮어쓰기를 막았습니다.";
+    return false;
   } finally {
     db?.close();
     durableSaveInFlight = false;
   }
+}
+
+async function persistExperienceOperationDurably() {
+  if (!durableStorageHydrated) return true;
+  for (let attempt = 0; durableSaveInFlight && attempt < 80; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  if (durableSaveInFlight) return false;
+  clearTimeout(durableSaveTimer);
+  durableSaveTimer = null;
+  return persistToDurableStorage();
 }
 
 function scheduleDurableSave(delay = DURABLE_SAVE_DELAY) {
@@ -1390,12 +1411,14 @@ async function hydrateFromDurableStorage() {
       activeId = snapshot.activeId || documents[0]?.id;
       customPrompts = Array.isArray(snapshot.customPrompts) ? snapshot.customPrompts : customPrompts;
       bootstrappedSample = false;
+      resolveStartupActiveDocument(readSessionRecoverySnapshot());
       safeLocalSet(ACTIVE_KEY, activeId || "");
       safeLocalSet(PROMPT_KEY, JSON.stringify(customPrompts));
       safeLocalSet(FOLDERS_KEY, JSON.stringify(folders));
       safeLocalSet(STORAGE_POINTER_KEY, JSON.stringify({ activeId, count: documents.length, restoredAt: new Date().toISOString() }));
       renderActive();
-    els.sessionText.textContent = "영구 저장소에서 문서를 복구했습니다.";
+      restoreSessionViewport(readSessionRecoverySnapshot());
+    setSessionText("");
     }
   } catch {
     els.sessionText.textContent = "영구 저장소를 읽지 못했습니다.";
@@ -1412,14 +1435,220 @@ function activeDoc() {
   return documents.find((doc) => doc.id === activeId) || documents[0];
 }
 
+function readSessionRecoverySnapshot() {
+  try {
+    const snapshot = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    return snapshot && typeof snapshot === "object" ? snapshot : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveStartupActiveDocument(snapshot = readSessionRecoverySnapshot()) {
+  const requestedIds = [
+    snapshot?.resume?.documentId,
+    activeId,
+    snapshot?.id,
+  ].filter((id) => typeof id === "string" && id);
+  const active = requestedIds
+    .map((id) => documents.find((doc) => doc.id === id && !doc.deletedAt))
+    .find(Boolean) || documents.find((doc) => !doc.deletedAt) || null;
+  if (!active) {
+    const fallback = createDocument("");
+    documents.unshift(fallback);
+    activeId = fallback.id;
+    persistNow({ flushRich: false });
+  } else {
+    activeId = active.id;
+  }
+  const mainPane = getPane("main");
+  if (mainPane) mainPane.documentId = activeId;
+  if (activeId) safeLocalSet(ACTIVE_KEY, activeId);
+  return documents.find((doc) => doc.id === activeId) || null;
+}
+
+function currentEditorMode() {
+  if (els.editorGrid.classList.contains("source-mode")) return "source";
+  if (els.editorGrid.classList.contains("clean-mode")) return "clean";
+  if (els.editorGrid.classList.contains("split-mode")) return "split";
+  return "rich";
+}
+
+function serializeEditorBoundary(node, offset) {
+  const path = [];
+  let current = node;
+  while (current && current !== els.richEditor) {
+    const parent = current.parentNode;
+    if (!parent) return null;
+    const index = Array.prototype.indexOf.call(parent.childNodes, current);
+    if (index < 0 || path.length >= 64) return null;
+    path.unshift(index);
+    current = parent;
+  }
+  if (current !== els.richEditor || !Number.isInteger(offset) || offset < 0) return null;
+  return { path, offset };
+}
+
+function resolveEditorBoundary(boundary) {
+  if (!boundary || !Array.isArray(boundary.path) || !Number.isInteger(boundary.offset) || boundary.offset < 0 || boundary.path.length > 64) return null;
+  let node = els.richEditor;
+  for (const index of boundary.path) {
+    if (!Number.isInteger(index) || index < 0 || index >= node.childNodes.length) return null;
+    node = node.childNodes[index];
+  }
+  const limit = node.nodeType === Node.TEXT_NODE ? node.data.length : node.childNodes.length;
+  if (boundary.offset > limit) return null;
+  return { node, offset: boundary.offset };
+}
+
+function serializeRichEditorSelection() {
+  if (compositionActive) return null;
+  const range = getEditorRangeFromSelection();
+  if (!range) return null;
+  const start = serializeEditorBoundary(range.startContainer, range.startOffset);
+  const end = serializeEditorBoundary(range.endContainer, range.endOffset);
+  return start && end ? { kind: "rich", start, end } : null;
+}
+
+function restoreRichEditorSelection(selectionState) {
+  if (!selectionState || selectionState.kind !== "rich") return false;
+  const start = resolveEditorBoundary(selectionState.start);
+  const end = resolveEditorBoundary(selectionState.end);
+  if (!start || !end) return false;
+  try {
+    const range = document.createRange();
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    savedEditorSelection = range.cloneRange();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function placeCaretAtEditorEnd() {
+  try {
+    const range = document.createRange();
+    range.selectNodeContents(els.richEditor);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    savedEditorSelection = range.cloneRange();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createSessionRecoveryPayload() {
+  const doc = activeDoc();
+  const mode = currentEditorMode();
+  const mainPane = getPane("main");
+  const scroller = getPaneScrollElement("main");
+  const sourceSelection = mode === "source" && Number.isInteger(els.editor.selectionStart) && Number.isInteger(els.editor.selectionEnd)
+    ? { kind: "source", start: els.editor.selectionStart, end: els.editor.selectionEnd }
+    : null;
+  const currentState = {
+    mode,
+    scrollTop: Math.min(10000000, Math.max(0, Number(scroller?.scrollTop ?? mainPane?.scrollTop) || 0)),
+    selection: sourceSelection || serializeRichEditorSelection(),
+  };
+  const previous = readSessionRecoverySnapshot()?.resume;
+  const previousDocuments = previous?.version === 2 && previous.documents && typeof previous.documents === "object"
+    ? previous.documents
+    : {};
+  return {
+    id: activeId,
+    title: doc?.title || "",
+    updatedAt: doc?.updatedAt || "",
+    resume: {
+      version: 2,
+      documentId: activeId,
+      ...currentState,
+      documents: activeId ? { ...previousDocuments, [activeId]: currentState } : previousDocuments,
+    },
+  };
+}
+
+function persistSessionRecoveryState() {
+  clearTimeout(sessionStateTimer);
+  sessionStateTimer = null;
+  safeLocalSet(SESSION_KEY, JSON.stringify(createSessionRecoveryPayload()));
+}
+
+function scheduleSessionRecoverySave(delay = 220) {
+  clearTimeout(sessionStateTimer);
+  sessionStateTimer = setTimeout(persistSessionRecoveryState, delay);
+}
+
+function getSessionResumeState(snapshot = readSessionRecoverySnapshot()) {
+  const resume = snapshot?.resume;
+  if (!resume || typeof resume !== "object" || resume.documentId !== activeId) return null;
+  const stored = resume.version === 2 && resume.documents && typeof resume.documents === "object"
+    ? resume.documents[activeId] || resume
+    : resume;
+  const mode = ["rich", "source", "clean", "split"].includes(stored?.mode) ? stored.mode : "rich";
+  return {
+    mode,
+    scrollTop: Math.min(10000000, Math.max(0, Number(stored?.scrollTop) || 0)),
+    selection: stored?.selection && typeof stored.selection === "object" ? stored.selection : null,
+  };
+}
+
+function restoreSessionViewport(snapshot = readSessionRecoverySnapshot()) {
+  const resume = getSessionResumeState(snapshot);
+  if (!resume) return null;
+  if (resume.mode !== currentEditorMode()) setMode(resume.mode);
+  const mainPane = getPane("main");
+  if (mainPane) mainPane.scrollTop = resume.scrollTop;
+  restorePaneScrollStable("main", resume.scrollTop);
+  return resume;
+}
+
+function canRestoreStartupFocus() {
+  return document.visibilityState === "visible" && !getTopOpenModal();
+}
+
+function restoreStartupFocus(snapshot = readSessionRecoverySnapshot()) {
+  if (startupResumeFocusApplied || !canRestoreStartupFocus()) return;
+  const resume = restoreSessionViewport(snapshot) || { mode: currentEditorMode(), selection: null };
+  if (resume.mode === "source") {
+    focusWithoutScroll(els.editor);
+    const start = Number(resume.selection?.start);
+    const end = Number(resume.selection?.end);
+    const length = els.editor.value.length;
+    if (resume.selection?.kind === "source" && Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end >= start && end <= length) els.editor.setSelectionRange(start, end);
+    else els.editor.setSelectionRange(length, length);
+  } else if (resume.mode === "rich" || resume.mode === "split") {
+    focusWithoutScroll(els.richEditor);
+    if (!restoreRichEditorSelection(resume.selection)) placeCaretAtEditorEnd();
+  } else {
+    focusWithoutScroll(document.querySelector(".mode-btn.active") || els.richEditor);
+  }
+  startupResumeFocusApplied = true;
+}
+
+function scheduleStartupResume(snapshot = readSessionRecoverySnapshot()) {
+  requestAnimationFrame(() => {
+    restoreSessionViewport(snapshot);
+    requestAnimationFrame(() => restoreStartupFocus(snapshot));
+  });
+}
+
 function defaultSplitWorkspace() {
   return {
+    version: 2,
     layout: "single",
     activePaneId: "main",
     syncScrollEnabled: false,
+    dividerRatio: 0.5,
     panes: [
-      { id: "main", documentId: activeId || null, mode: "write", scrollTop: 0, lockedScroll: false, readonly: false, syncScrollGroup: null, widthRatio: 0.5, lastUserScrollAt: 0, lastProgrammaticRestoreAt: 0, lockedScrollTop: 0 },
-      { id: "reference", documentId: activeId || null, mode: "readonly", scrollTop: 0, lockedScroll: true, readonly: true, syncScrollGroup: null, widthRatio: 0.5, lastUserScrollAt: 0, lastProgrammaticRestoreAt: 0, lockedScrollTop: 0 },
+      { id: "main", documentId: activeId || null, mode: "rich", scrollTop: 0, selection: null, lockedScroll: false, readonly: false, syncScrollGroup: null, widthRatio: 0.5, lastUserScrollAt: 0, lastProgrammaticRestoreAt: 0, lockedScrollTop: 0 },
+      { id: "reference", documentId: activeId || null, mode: "rich", suspendedMode: null, scrollTop: 0, selection: null, lockedScroll: false, readonly: false, syncScrollGroup: null, widthRatio: 0.5, lastUserScrollAt: 0, lastProgrammaticRestoreAt: 0, lockedScrollTop: 0 },
     ],
   };
 }
@@ -1432,18 +1661,20 @@ function loadSplitWorkspace() {
     const storedPanes = safeArray(stored.panes);
     const panes = base.panes.map((fallback) => {
       const storedPane = storedPanes.find((pane) => pane?.id === fallback.id) || {};
-      const docExists = !storedPane.documentId || documents.some((doc) => doc.id === storedPane.documentId);
+      const docExists = !storedPane.documentId || documents.some((doc) => doc.id === storedPane.documentId && !doc.deletedAt);
+      const storedMode = storedPane.mode === "readonly" ? "preview" : storedPane.mode;
       return {
         ...fallback,
         ...storedPane,
         documentId: docExists ? storedPane.documentId || fallback.documentId : activeId || null,
-        mode: ["write", "source", "preview", "clean", "readonly"].includes(storedPane.mode) ? storedPane.mode : fallback.mode,
+        mode: ["rich", "write", "source", "preview", "clean"].includes(storedMode) ? (storedMode === "write" ? "rich" : storedMode) : fallback.mode,
         scrollTop: Number.isFinite(storedPane.scrollTop) ? storedPane.scrollTop : 0,
         lockedScrollTop: Number.isFinite(storedPane.lockedScrollTop) ? storedPane.lockedScrollTop : Number.isFinite(storedPane.scrollTop) ? storedPane.scrollTop : 0,
         lastUserScrollAt: 0,
         lastProgrammaticRestoreAt: 0,
         lockedScroll: Boolean(storedPane.lockedScroll ?? fallback.lockedScroll),
-        readonly: fallback.id === "main" ? false : true,
+        selection: storedPane.selection && typeof storedPane.selection === "object" ? storedPane.selection : null,
+        readonly: Boolean(storedPane.readonly),
       };
     });
     const layout = ["single", "vertical-2", "horizontal-2"].includes(stored.layout) ? stored.layout : "single";
@@ -1454,6 +1685,7 @@ function loadSplitWorkspace() {
       activePaneId: panes.some((pane) => pane.id === stored.activePaneId) ? stored.activePaneId : "main",
       panes,
       syncScrollEnabled: Boolean(stored.syncScrollEnabled),
+      dividerRatio: Math.min(0.8, Math.max(0.2, Number(stored.dividerRatio) || 0.5)),
     };
   } catch {
     return defaultSplitWorkspace();
@@ -1482,6 +1714,90 @@ function getActiveDocumentId() {
 
 function getActiveDocument() {
   return documents.find((doc) => doc.id === getActiveDocumentId()) || activeDoc();
+}
+
+function serializeBoundaryForRoot(root, node, offset) {
+  const path = [];
+  let current = node;
+  while (current && current !== root) {
+    const parent = current.parentNode;
+    if (!parent || path.length >= 64) return null;
+    const index = Array.prototype.indexOf.call(parent.childNodes, current);
+    if (index < 0) return null;
+    path.unshift(index);
+    current = parent;
+  }
+  return current === root && Number.isInteger(offset) && offset >= 0 ? { path, offset } : null;
+}
+
+function resolveBoundaryForRoot(root, boundary) {
+  if (!root || !boundary || !Array.isArray(boundary.path) || boundary.path.length > 64 || !Number.isInteger(boundary.offset) || boundary.offset < 0) return null;
+  let node = root;
+  for (const index of boundary.path) {
+    if (!Number.isInteger(index) || index < 0 || index >= node.childNodes.length) return null;
+    node = node.childNodes[index];
+  }
+  const limit = node.nodeType === Node.TEXT_NODE ? node.data.length : node.childNodes.length;
+  return boundary.offset <= limit ? { node, offset: boundary.offset } : null;
+}
+
+function captureSelectionForRoot(root) {
+  if (!root) return null;
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return null;
+  const range = selection.getRangeAt(0);
+  if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null;
+  const start = serializeBoundaryForRoot(root, range.startContainer, range.startOffset);
+  const end = serializeBoundaryForRoot(root, range.endContainer, range.endOffset);
+  return start && end ? { kind: "rich", start, end } : null;
+}
+
+function restoreSelectionForRoot(root, selectionState) {
+  if (!root || selectionState?.kind !== "rich") return false;
+  const start = resolveBoundaryForRoot(root, selectionState.start);
+  const end = resolveBoundaryForRoot(root, selectionState.end);
+  if (!start || !end) return false;
+  try {
+    const range = document.createRange();
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function captureMainViewState() {
+  const mode = currentEditorMode();
+  const selection = mode === "source"
+    ? { kind: "source", start: els.editor.selectionStart || 0, end: els.editor.selectionEnd || 0 }
+    : serializeRichEditorSelection();
+  return { mode, scrollTop: Math.max(0, Number(currentMainScroller()?.scrollTop) || 0), selection };
+}
+
+function restoreMainViewState(viewState, options = {}) {
+  if (!viewState || typeof viewState !== "object") return false;
+  const mode = ["rich", "source", "clean", "split"].includes(viewState.mode) ? viewState.mode : "rich";
+  if (mode !== currentEditorMode()) setMode(mode);
+  const main = getPane("main");
+  if (main) main.scrollTop = Math.max(0, Number(viewState.scrollTop) || 0);
+  requestAnimationFrame(() => {
+    restorePaneScrollStable("main", main?.scrollTop || 0);
+    if (options.focus === false) return;
+    if (mode === "source") {
+      focusWithoutScroll(els.editor);
+      const start = Number(viewState.selection?.start);
+      const end = Number(viewState.selection?.end);
+      if (viewState.selection?.kind === "source" && Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end >= start && end <= els.editor.value.length) els.editor.setSelectionRange(start, end);
+    } else if (mode === "rich" || mode === "split") {
+      focusWithoutScroll(els.richEditor);
+      restoreRichEditorSelection(viewState.selection);
+    }
+  });
+  return true;
 }
 
 function setActivePane(paneId) {
@@ -1513,7 +1829,13 @@ function focusWithoutScroll(element) {
 }
 
 function openDocumentInPane(documentId, paneId = "main", options = {}) {
-  if (paneId === "main") flushRichDocumentNow("before-document-switch");
+  if (paneId === "main") {
+    const previousId = activeId;
+    const viewState = captureMainViewState();
+    flushRichDocumentNow("before-document-switch");
+    flushReferenceDocumentNow("before-main-document-switch");
+    window.dispatchEvent(new CustomEvent("textforge:before-active-document-change", { detail: { id: previousId, viewState } }));
+  }
   if (paneId === "main") startDocumentSwitchTrace(documentId, options.source || "unknown");
   markDocumentSwitch("openDocumentInPane:start");
   const doc = documents.find((item) => item.id === documentId);
@@ -1524,11 +1846,15 @@ function openDocumentInPane(documentId, paneId = "main", options = {}) {
   }
   if (paneId === "main") {
     savePaneScroll("main");
+    persistSessionRecoveryState();
     activeId = doc.id;
     splitWorkspace.panes[0].documentId = doc.id;
     splitWorkspace.activePaneId = "main";
     safeLocalSet(ACTIVE_KEY, activeId);
     renderActive();
+    if (options.viewState) restoreMainViewState(options.viewState, { focus: options.focus !== false });
+    scheduleSessionRecoverySave(0);
+    schedulePortalStateBroadcast(0);
     markDocumentSwitch("openDocumentInPane:end");
     return;
   }
@@ -1536,8 +1862,10 @@ function openDocumentInPane(documentId, paneId = "main", options = {}) {
   if (!pane) return;
   savePaneScroll(paneId);
   pane.documentId = doc.id;
-  pane.mode = options.mode || pane.mode || "readonly";
-  pane.readonly = true;
+  flushReferenceDocumentNow("before-reference-document-switch");
+  pane.mode = options.mode === "readonly" ? "preview" : options.mode || pane.mode || "rich";
+  pane.suspendedMode = null;
+  pane.readonly = doc.id === activeId || isDocumentDetached(doc.id);
   pane.scrollTop = 0;
   pane.lockedScroll = options.lockedScroll ?? pane.lockedScroll ?? true;
   splitWorkspace.layout = options.layout || splitWorkspace.layout || "vertical-2";
@@ -1549,23 +1877,46 @@ function openDocumentInPane(documentId, paneId = "main", options = {}) {
 
 function openDocumentInNewPane(documentId, options = {}) {
   splitWorkspace.layout = options.layout || "vertical-2";
-  openDocumentInPane(documentId, "reference", { mode: options.mode || "readonly", lockedScroll: options.lockedScroll ?? true, layout: splitWorkspace.layout });
+  openDocumentInPane(documentId, "reference", { mode: options.mode || "rich", lockedScroll: options.lockedScroll ?? false, layout: splitWorkspace.layout });
 }
 
 function duplicateCurrentDocumentToReferencePane(layout = "vertical-2") {
   if (!activeId) return;
   splitWorkspace.layout = layout;
-  openDocumentInPane(activeId, "reference", { mode: "readonly", lockedScroll: true, layout });
+  openDocumentInPane(activeId, "reference", { mode: "preview", lockedScroll: true, layout });
   setActivePane("main");
 }
 
 function closePane(paneId) {
   if (paneId === "main") return;
+  flushReferenceDocumentNow("close-reference-pane");
   savePaneScroll(paneId);
   splitWorkspace.layout = "single";
   splitWorkspace.activePaneId = "main";
   persistSplitWorkspace();
   renderSplitWorkspace();
+}
+
+function swapDocumentPanes() {
+  const reference = getPane("reference");
+  if (!reference?.documentId || reference.documentId === activeId) return false;
+  flushRichDocumentNow("before-pane-swap");
+  flushReferenceDocumentNow("before-pane-swap");
+  const previousMainId = activeId;
+  const previousMainView = captureMainViewState();
+  const previousReference = { documentId: reference.documentId, mode: reference.mode, scrollTop: reference.scrollTop, selection: reference.selection };
+  reference.documentId = previousMainId;
+  reference.mode = previousMainView.mode === "split" ? "rich" : previousMainView.mode;
+  reference.scrollTop = previousMainView.scrollTop;
+  reference.selection = previousMainView.selection;
+  openDocumentInPane(previousReference.documentId, "main", {
+    source: "split-swap",
+    viewState: { mode: previousReference.mode === "preview" ? "rich" : previousReference.mode, scrollTop: previousReference.scrollTop, selection: previousReference.selection },
+  });
+  splitWorkspace.activePaneId = "main";
+  persistSplitWorkspace();
+  renderSplitWorkspace({ preserveScroll: false, reason: "pane-swap" });
+  return true;
 }
 
 function setSplitLayout(layout) {
@@ -1576,6 +1927,50 @@ function setSplitLayout(layout) {
   if (layout !== "single" && !getPane("reference").documentId) getPane("reference").documentId = activeId;
   persistSplitWorkspace();
   renderSplitWorkspace();
+}
+
+function restoreSplitWorkspaceState(snapshot) {
+  const backup = splitWorkspace;
+  try {
+    if (!snapshot || typeof snapshot !== "object") throw new Error("Invalid split workspace");
+    const base = defaultSplitWorkspace();
+    const validDocs = new Set(documents.filter((doc) => !doc.deletedAt).map((doc) => doc.id));
+    const sourcePanes = safeArray(snapshot.panes);
+    const panes = base.panes.map((fallback) => {
+      const source = sourcePanes.find((pane) => pane?.id === fallback.id) || {};
+      const documentId = validDocs.has(source.documentId)
+        ? source.documentId
+        : fallback.id === "main"
+          ? activeId
+          : documents.find((doc) => !doc.deletedAt && doc.id !== activeId)?.id || activeId;
+      return {
+        ...fallback,
+        documentId,
+        mode: ["rich", "source", "preview", "clean"].includes(source.mode) ? source.mode : fallback.mode,
+        scrollTop: Math.max(0, Number(source.scrollTop) || 0),
+        selection: source.selection && typeof source.selection === "object" ? source.selection : null,
+        lockedScroll: Boolean(source.lockedScroll),
+      };
+    });
+    splitWorkspace = {
+      ...base,
+      version: 2,
+      layout: ["single", "vertical-2", "horizontal-2"].includes(snapshot.layout) ? snapshot.layout : "single",
+      activePaneId: snapshot.activePaneId === "reference" ? "reference" : "main",
+      syncScrollEnabled: Boolean(snapshot.syncScrollEnabled),
+      dividerRatio: Math.min(0.8, Math.max(0.2, Number(snapshot.dividerRatio) || 0.5)),
+      panes,
+    };
+    const mainDocumentId = panes[0].documentId;
+    if (mainDocumentId && mainDocumentId !== activeId) openDocumentInPane(mainDocumentId, "main", { source: "workspace-split-restore", focus: false });
+    persistSplitWorkspace();
+    renderSplitWorkspace({ preserveScroll: false, reason: "workspace-restore" });
+    return true;
+  } catch {
+    splitWorkspace = backup;
+    renderSplitWorkspace({ preserveScroll: false, reason: "workspace-rollback" });
+    return false;
+  }
 }
 
 function setPaneScrollLocked(paneId, locked) {
@@ -1632,7 +2027,8 @@ function restorePaneScrollStable(paneId, savedScrollTop = getPane(paneId)?.scrol
 }
 
 function getPaneScrollElement(paneId) {
-  return paneId === "main" ? currentMainScroller() : els.referencePaneBody;
+  if (paneId === "main") return currentMainScroller();
+  return getPane("reference")?.mode === "source" ? els.referenceSourceEditor : getPane("reference")?.mode === "preview" || getPane("reference")?.mode === "clean" ? els.referencePreview : els.referencePaneBody;
 }
 
 function currentMainScroller() {
@@ -1693,7 +2089,7 @@ function markReferenceUserScroll() {
 
 function handleReferenceScroll() {
   const pane = getPane("reference");
-  const scroller = els.referencePaneBody;
+  const scroller = getPaneScrollElement("reference");
   if (!pane || !scroller) return;
   if (Date.now() - (pane.lastProgrammaticRestoreAt || 0) < 90) return;
   const isUserScroll = Date.now() - (pane.lastUserScrollAt || 0) < 500;
@@ -1771,30 +2167,69 @@ function renderReferencePane() {
   const pane = getPane("reference");
   const visible = splitWorkspace.layout !== "single";
   els.referencePane?.classList.toggle("hidden", !visible);
+  els.splitDivider?.classList.toggle("hidden", !visible);
   if (!visible || !pane) return;
-  const doc = documents.find((item) => item.id === pane.documentId) || activeDoc();
+  const doc = documents.find((item) => item.id === pane.documentId && !item.deletedAt) || documents.find((item) => item.id !== activeId && !item.deletedAt) || activeDoc();
   if (!doc) {
     els.referencePaneBody.innerHTML = '<p class="empty-note">열 문서가 없습니다.</p>';
     return;
   }
   pane.documentId = doc.id;
+  const duplicate = doc.id === activeId;
+  const detached = isDocumentDetached(doc.id);
+  pane.readonly = duplicate || detached;
+  if (pane.readonly && pane.mode === "rich") {
+    pane.suspendedMode = "rich";
+    pane.mode = "preview";
+  } else if (!pane.readonly && pane.suspendedMode) {
+    pane.mode = pane.suspendedMode;
+    pane.suspendedMode = null;
+  }
   els.referencePaneTitle.textContent = doc.title || "Untitled";
-  if (els.referencePaneMode) els.referencePaneMode.value = pane.mode || "readonly";
+  if (els.referencePaneQuickLookBtn) els.referencePaneQuickLookBtn.dataset.docId = doc.id;
+  if (els.referencePaneMode) els.referencePaneMode.value = pane.mode || "rich";
   if (els.referenceDocSelect) els.referenceDocSelect.value = doc.id;
   const html = doc.contentHtml || markdownToHtml(doc.content || "");
-  const previousSignature = els.referencePaneBody.dataset.renderSignature || "";
-  const signature = `${doc.id}:${doc.updatedAt || ""}:${pane.mode || "readonly"}`;
-  if (pane.lockedScroll && previousSignature === signature) {
+  const signature = `${doc.id}:${doc.updatedAt || ""}:${pane.mode || "rich"}:${pane.readonly}`;
+  const activeEditor = pane.mode === "source" ? els.referenceSourceEditor : pane.mode === "rich" ? els.referencePaneBody : els.referencePreview;
+  const previousSignature = activeEditor?.dataset.renderSignature || "";
+  if ((pane.lockedScroll || referenceDocumentDirty) && previousSignature === signature) {
     restorePaneScrollStable("reference", pane.lockedScrollTop ?? pane.scrollTop ?? 0);
     return;
   }
+  els.referencePaneBody.classList.toggle("hidden", pane.mode !== "rich");
+  els.referenceSourceEditor?.classList.toggle("hidden", pane.mode !== "source");
+  els.referencePreview?.classList.toggle("hidden", pane.mode !== "preview" && pane.mode !== "clean");
   if (pane.mode === "source") {
-    els.referencePaneBody.innerHTML = `<pre><code>${escapeHtml(doc.content || htmlToMarkdown(html))}</code></pre>`;
+    if (document.activeElement !== els.referenceSourceEditor || !referenceDocumentDirty) els.referenceSourceEditor.value = doc.content || htmlToMarkdown(html);
+    els.referenceSourceEditor.readOnly = pane.readonly;
+    els.referenceSourceEditor.dataset.renderSignature = signature;
+  } else if (pane.mode === "rich") {
+    if (document.activeElement !== els.referencePaneBody || !referenceDocumentDirty) els.referencePaneBody.innerHTML = prepareHtmlForThemedRender(html);
+    els.referencePaneBody.setAttribute("contenteditable", pane.readonly ? "false" : "true");
+    els.referencePaneBody.dataset.renderSignature = signature;
   } else {
-    els.referencePaneBody.innerHTML = prepareHtmlForThemedRender(html);
+    els.referencePreview.innerHTML = prepareHtmlForThemedRender(html);
+    els.referencePreview.dataset.renderSignature = signature;
   }
-  els.referencePaneBody.dataset.renderSignature = signature;
-  els.referencePaneBody.setAttribute("contenteditable", "false");
+  const status = duplicate
+    ? "This document is already editable in the main pane. Choose another document to edit here."
+    : detached
+      ? "Editing is owned by a detached window."
+      : "";
+  if (els.referencePaneStatus) {
+    els.referencePaneStatus.textContent = status;
+    els.referencePaneStatus.classList.toggle("hidden", !status);
+  }
+  requestAnimationFrame(() => {
+    restorePaneScrollStable("reference", pane.scrollTop || 0);
+    if (!pane.readonly && pane.mode === "rich") restoreSelectionForRoot(els.referencePaneBody, pane.selection);
+    if (!pane.readonly && pane.mode === "source" && pane.selection?.kind === "source") {
+      const start = Math.min(els.referenceSourceEditor.value.length, Math.max(0, Number(pane.selection.start) || 0));
+      const end = Math.min(els.referenceSourceEditor.value.length, Math.max(start, Number(pane.selection.end) || start));
+      els.referenceSourceEditor.setSelectionRange(start, end);
+    }
+  });
   scheduleContentColorAdaptation(0);
 }
 
@@ -1809,6 +2244,20 @@ function applySplitWorkspaceUi() {
   els.referencePane?.classList.toggle("active-pane", splitWorkspace.activePaneId === "reference");
   els.editorGrid.querySelector(".editor-pane")?.classList.toggle("active-pane", splitWorkspace.activePaneId === "main");
   const ref = getPane("reference");
+  if (els.mainPaneQuickLookBtn) {
+    els.mainPaneQuickLookBtn.dataset.docId = activeId || "";
+    els.mainPaneQuickLookBtn.disabled = layout === "single" || splitWorkspace.activePaneId === "main";
+  }
+  if (els.referencePaneQuickLookBtn) {
+    els.referencePaneQuickLookBtn.dataset.docId = ref?.documentId || "";
+    els.referencePaneQuickLookBtn.disabled = layout === "single" || splitWorkspace.activePaneId === "reference";
+  }
+  const ratio = Math.min(0.8, Math.max(0.2, Number(splitWorkspace.dividerRatio) || 0.5));
+  els.editorGrid.style.setProperty("--tf-split-ratio", `${ratio * 100}%`);
+  if (els.splitDivider) {
+    els.splitDivider.setAttribute("aria-orientation", layout === "horizontal-2" ? "horizontal" : "vertical");
+    els.splitDivider.setAttribute("aria-valuenow", String(Math.round(ratio * 100)));
+  }
   if (els.referenceScrollLockBtn) els.referenceScrollLockBtn.textContent = ref?.lockedScroll ? "Locked" : "Lock";
   if (els.referenceSyncBtn) els.referenceSyncBtn.textContent = splitWorkspace.syncScrollEnabled ? "Sync On" : "Sync Off";
   if (els.splitSyncBtn) els.splitSyncBtn.textContent = splitWorkspace.syncScrollEnabled ? "스크롤 동기화 켜짐" : "스크롤 동기화 꺼짐";
@@ -1836,12 +2285,12 @@ function persistNow(options = {}) {
   if (options.flushRich !== false) flushRichDocumentNow("persist");
   safeLocalSet(ACTIVE_KEY, activeId || "");
   safeLocalSet(FOLDERS_KEY, JSON.stringify(folders));
-  safeLocalSet(SESSION_KEY, JSON.stringify({ id: activeId, title: activeDoc()?.title || "", updatedAt: activeDoc()?.updatedAt || "" }));
+  persistSessionRecoveryState();
   safeLocalSet(STORAGE_POINTER_KEY, JSON.stringify({ activeId, count: documents.length, updatedAt: new Date().toISOString() }));
   scheduleDurableSave();
   els.saveState.textContent = `저장됨 ${new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`;
   renderDocList();
-  if (els.appShell.classList.contains("finder-active")) renderFinder();
+  schedulePortalStateBroadcast();
 }
 
 function updateActive(mutator) {
@@ -1892,28 +2341,18 @@ function updateActiveDocListItemOnly(previousId, nextId) {
   [previousId, nextId].filter(Boolean).forEach((id) => {
     const item = els.docList.querySelector(`[data-doc-id="${CSS.escape(id)}"]`);
     if (!item) return;
-    item.classList.toggle("active", id === nextId);
+    const isActive = id === nextId;
+    item.classList.toggle("active", isActive);
+    item.setAttribute("aria-current", isActive ? "page" : "false");
     touched = true;
   });
   return touched;
 }
 
-function updateFinderActiveCardOnly(previousId, nextId) {
-  if (!els.finderGrid) return false;
-  let touched = false;
-  if (!previousId) {
-    els.finderGrid.querySelectorAll(".doc-card.active").forEach((item) => {
-      item.classList.remove("active");
-      touched = true;
-    });
-  }
-  [previousId, nextId].filter(Boolean).forEach((id) => {
-    const item = els.finderGrid.querySelector(`[data-doc-id="${CSS.escape(id)}"]`);
-    if (!item) return;
-    item.classList.toggle("active", id === nextId);
-    touched = true;
-  });
-  return touched;
+function revealActiveDocListItem(documentId = activeId) {
+  if (!els.docList || !documentId) return;
+  const item = els.docList.querySelector(`[data-doc-id="${CSS.escape(documentId)}"]`);
+  item?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "auto" });
 }
 
 function scheduleSplitWorkspaceRender(delay = 80) {
@@ -1953,6 +2392,7 @@ function renderActiveDeferred(docId) {
   markDocumentSwitch("after deferred refreshSplitDocumentSelectors");
   scheduleContentColorAdaptation(80);
   scheduleSplitWorkspaceRender(80);
+  revealActiveDocListItem(docId);
   markDocumentSwitch("renderActiveDeferred:end");
 }
 
@@ -1971,12 +2411,14 @@ function renderActive() {
   markDocumentSwitch("renderActive:start");
   const doc = activeDoc();
   if (!doc) return;
+  window.dispatchEvent(new CustomEvent("textforge:active-document-change", { detail: { id: doc.id } }));
   cancelPendingPostSwitchRender();
   splitWorkspace.panes[0].documentId = doc.id;
   els.titleInput.value = doc.title;
   els.editor.value = doc.content;
   markDocumentSwitch("after title/source/editor update");
   setRichEditorHtmlPrepared(doc.contentHtml || markdownToHtml(doc.content || ""));
+  applyDetachedOwnershipUi();
   markDocumentSwitch("after richEditor.innerHTML");
   els.themeSelect.value = doc.theme || "modern";
   applyDocumentTheme(doc.theme || "modern");
@@ -1992,7 +2434,6 @@ function renderActive() {
   }
   markDocumentSwitch("before fast doc list active update");
   updateActiveDocListItemOnly(null, doc.id);
-  updateFinderActiveCardOnly(null, doc.id);
   markDocumentSwitch("after fast doc list active update");
   markDocumentSwitch("before schedule post switch render");
   schedulePostSwitchRender(doc.id);
@@ -2025,6 +2466,7 @@ function renderDocList() {
     item.className = `doc-item${doc.id === activeId ? " active" : ""}`;
     item.type = "button";
     item.dataset.docId = doc.id;
+    item.setAttribute("aria-current", doc.id === activeId ? "page" : "false");
     const tags = doc.tags.length ? `<span class="doc-tags">${doc.tags.map((tag) => `#${escapeHtml(tag)}`).join(" ")}</span>` : "";
     item.innerHTML = `<strong>${doc.favorite ? "★ " : ""}${escapeHtml(doc.title)}</strong><span>${escapeHtml(doc._summary || "빈 문서")}</span>${tags}`;
     item.addEventListener("click", () => {
@@ -2041,19 +2483,526 @@ function renderDocList() {
   markDocumentSwitch("renderDocList:end");
 }
 
-function openFinder() {
-  els.appShell.classList.add("finder-active");
-  finderState.page = 0;
-  renderFinder();
-  focusWithoutScroll(els.finderSearchInput);
+function getPortalLibrarySnapshot() {
+  return {
+    documents: documents.map((doc) => ({
+      id: doc.id,
+      title: doc.title || "Untitled",
+      previewText: doc.previewText || doc._summary || "",
+      type: doc.type || "note",
+      folderId: doc.folderId || null,
+      tags: safeArray(doc.tags).slice(0, 20),
+      favorite: Boolean(doc.favorite),
+      deletedAt: doc.deletedAt || null,
+      createdAt: doc.createdAt,
+      updatedAt: doc.updatedAt,
+      charCount: Number(doc.charCount || 0),
+      color: doc.color || DOC_COLORS[0],
+      historyCount: safeArray(doc.history).length,
+    })),
+    folders: folders.map((folder) => ({ ...folder })),
+    activeId,
+    theme: getStoredTheme(),
+    resolvedTheme: resolveTheme(),
+    updatedAt: new Date().toISOString(),
+    authority: "main-window",
+  };
+}
+
+function refreshPortalSearchMetadata(doc) {
+  const plain = safeString(doc.plainText);
+  doc.searchText = `${doc.title}\n${doc.type}\n${safeArray(doc.tags).join(" ")}\n${plain}`.toLowerCase();
+  Object.defineProperty(doc, "_searchText", { value: doc.searchText, configurable: true });
+  Object.defineProperty(doc, "_summary", { value: doc.previewText || "", configurable: true });
+  return doc;
+}
+
+function sendPortalLibraryMessage(type, payload = {}, targetWindow = null) {
+  const message = { source: "textforge-main", type, payload };
+  if (targetWindow && !targetWindow.closed) {
+    targetWindow.postMessage(message, location.origin);
+    return;
+  }
+  if (portalLibraryChannel) portalLibraryChannel.postMessage(message);
+  else if (portalLibraryWindow && !portalLibraryWindow.closed) portalLibraryWindow.postMessage(message, location.origin);
+}
+
+function schedulePortalStateBroadcast(delay = 40) {
+  if (!portalLibraryConnected) return;
+  clearTimeout(portalStateBroadcastTimer);
+  portalStateBroadcastTimer = setTimeout(() => {
+    sendPortalLibraryMessage("state", getPortalLibrarySnapshot());
+  }, delay);
+}
+
+function openPortalLibrary(options = {}) {
+  const locationOptions = typeof options === "string" ? { smartFolder: options } : options;
+  const query = new URLSearchParams();
+  if (locationOptions.smartFolder && locationOptions.smartFolder !== "all") query.set("smart", locationOptions.smartFolder);
+  if (locationOptions.folderId) query.set("folder", locationOptions.folderId);
+  const portalUrl = `portal-library.html${query.size ? `?${query}` : ""}`;
+  portalLibraryConnected = true;
+  const features = "popup=yes,width=1480,height=940,resizable=yes,scrollbars=no";
+  portalLibraryWindow = window.open(portalUrl, "textforge-portal-library", features);
+  if (!portalLibraryWindow) {
+    setSessionText("Portal Library popup was blocked. Allow popups for 127.0.0.1.");
+    return null;
+  }
+  portalLibraryWindow.focus();
+  setSessionText("Portal Library opened");
+  schedulePortalStateBroadcast(120);
+  return portalLibraryWindow;
+}
+
+function rememberPortalRequest(requestId) {
+  if (!requestId) return true;
+  if (portalSeenRequestIds.has(requestId)) return false;
+  portalSeenRequestIds.add(requestId);
+  if (portalSeenRequestIds.size > 300) {
+    const oldest = portalSeenRequestIds.values().next().value;
+    portalSeenRequestIds.delete(oldest);
+  }
+  return true;
+}
+
+function pushPortalOperationSnapshot(reason) {
+  portalOperationUndoStack.push({
+    reason,
+    activeId,
+    documents: documents.map((doc) => ({
+      id: doc.id,
+      title: doc.title,
+      folderId: doc.folderId || null,
+      deletedAt: doc.deletedAt || null,
+      favorite: Boolean(doc.favorite),
+      updatedAt: doc.updatedAt,
+    })),
+    folders: folders.map((folder) => ({ ...folder })),
+  });
+  portalOperationUndoStack = portalOperationUndoStack.slice(-20);
+}
+
+function restorePortalOperation() {
+  const snapshot = portalOperationUndoStack.pop();
+  if (!snapshot) return false;
+  flushRichDocumentNow("before-portal-undo");
+  const metadataById = new Map(snapshot.documents.map((doc) => [doc.id, doc]));
+  documents.forEach((doc) => {
+    const before = metadataById.get(doc.id);
+    if (!before) return;
+    doc.title = before.title;
+    doc.folderId = before.folderId;
+    doc.deletedAt = before.deletedAt;
+    doc.favorite = before.favorite;
+    doc.updatedAt = before.updatedAt;
+    refreshPortalSearchMetadata(doc);
+  });
+  folders = normalizeFolders(snapshot.folders);
+  if (snapshot.activeId && documents.some((doc) => doc.id === snapshot.activeId)) activeId = snapshot.activeId;
+  persistNow({ flushRich: false });
+  renderActive();
+  setSessionText(`Portal operation restored: ${snapshot.reason}`);
+  return true;
+}
+
+function portalFolderMoveAllowed(folderId, parentId) {
+  if (window.TextForgePortalCore?.canMoveFolder) return window.TextForgePortalCore.canMoveFolder(folders, folderId, parentId);
+  if (!parentId) return folderId !== parentId;
+  const descendants = new Set();
+  const queue = [folderId];
+  while (queue.length) {
+    const current = queue.shift();
+    folders.forEach((folder) => {
+      if (folder.parentId === current && !descendants.has(folder.id)) {
+        descendants.add(folder.id);
+        queue.push(folder.id);
+      }
+    });
+  }
+  return folderId !== parentId && !descendants.has(parentId);
+}
+
+function portalOperationResult(message, options = {}, targetWindow = null) {
+  sendPortalLibraryMessage("operation-result", {
+    message,
+    undoAvailable: Boolean(options.undoAvailable),
+    movedDocumentIds: options.movedDocumentIds || [],
+  }, targetWindow);
+  schedulePortalStateBroadcast(0);
+}
+
+function portalOperationError(error, targetWindow = null) {
+  const message = String(error?.message || error || "Portal operation failed");
+  sendPortalLibraryMessage("error", { message }, targetWindow);
+  setSessionText(message);
+}
+
+async function handlePortalLibraryMessage(message, targetWindow = null) {
+  if (!message || message.source !== "textforge-portal" || !rememberPortalRequest(message.requestId)) return;
+  portalLibraryConnected = true;
+  if (targetWindow && !targetWindow.closed) portalLibraryWindow = targetWindow;
+  const payload = message.payload || {};
+  try {
+    if (message.type === "request-state") {
+      sendPortalLibraryMessage("state", getPortalLibrarySnapshot(), targetWindow);
+      return;
+    }
+    if (message.type === "request-preview") {
+      if (payload.docId === activeId) flushRichDocumentNow("portal-preview");
+      const doc = documents.find((item) => item.id === payload.docId);
+      if (!doc) throw new Error("Preview document not found");
+      sendPortalLibraryMessage("preview", {
+        docId: doc.id,
+        title: doc.title,
+        contentHtml: sanitizeRichHtml(doc.contentHtml || markdownToHtml(doc.content || "")),
+        updatedAt: doc.updatedAt,
+        charCount: doc.charCount || 0,
+        folder: folders.find((item) => item.id === doc.folderId)?.name || "Inbox",
+        favorite: Boolean(doc.favorite),
+        deleted: Boolean(doc.deletedAt),
+      }, targetWindow);
+      return;
+    }
+    if (message.type === "open-quick-note") {
+      window.focus();
+      const opened = window.TextForgeMacintoshExperience?.openQuickNote?.();
+      if (opened === false || !window.TextForgeMacintoshExperience) throw new Error("Quick Note is not ready");
+      portalOperationResult("Quick Note를 열었습니다.", {}, targetWindow);
+      return;
+    }
+    if (message.type === "open-document") {
+      openDocumentInPane(payload.docId, "main", { source: "portal-library" });
+      window.focus();
+      schedulePortalStateBroadcast(0);
+      return;
+    }
+    if (message.type === "undo-portal-operation") {
+      if (!restorePortalOperation()) throw new Error("No Portal operation to restore");
+      portalOperationResult("이전 Portal 작업을 되돌렸습니다.", { undoAvailable: portalOperationUndoStack.length > 0 }, targetWindow);
+      return;
+    }
+
+    flushRichDocumentNow("before-portal-operation");
+    const nowIso = new Date().toISOString();
+    if (message.type === "move-documents") {
+      const targetFolder = payload.folderId ? folders.find((folder) => folder.id === payload.folderId) : null;
+      if (payload.folderId && !targetFolder) throw new Error("Target folder not found");
+      const ids = new Set(safeArray(payload.docIds));
+      const affected = documents.filter((doc) => ids.has(doc.id));
+      if (!affected.length) throw new Error("No documents selected for move");
+      pushPortalOperationSnapshot("move-documents");
+      affected.forEach((doc) => {
+        doc.folderId = targetFolder?.id || null;
+        doc.updatedAt = nowIso;
+      });
+      persistNow({ flushRich: false });
+      portalOperationResult(`${affected.length}개 문서를 ${targetFolder?.name || "루트"}(으)로 이동했습니다.`, { undoAvailable: true, movedDocumentIds: affected.map((doc) => doc.id) }, targetWindow);
+      return;
+    }
+    if (message.type === "move-folders") {
+      const targetParent = payload.parentId ? folders.find((folder) => folder.id === payload.parentId) : null;
+      if (payload.parentId && !targetParent) throw new Error("Target folder not found");
+      const ids = safeArray(payload.folderIds).filter((id) => folders.some((folder) => folder.id === id));
+      if (!ids.length || ids.some((id) => !portalFolderMoveAllowed(id, targetParent?.id || null))) throw new Error("A folder cannot be moved into itself or its child");
+      pushPortalOperationSnapshot("move-folders");
+      folders.forEach((folder) => {
+        if (ids.includes(folder.id)) {
+          folder.parentId = targetParent?.id || null;
+          folder.updatedAt = nowIso;
+        }
+      });
+      persistNow({ flushRich: false });
+      portalOperationResult(`${ids.length}개 폴더를 이동했습니다.`, { undoAvailable: true }, targetWindow);
+      return;
+    }
+    if (message.type === "rename-document") {
+      const doc = documents.find((item) => item.id === payload.docId);
+      if (!doc || !String(payload.title || "").trim()) throw new Error("Document rename request is invalid");
+      pushPortalOperationSnapshot("rename-document");
+      doc.title = String(payload.title).trim();
+      doc.updatedAt = nowIso;
+      refreshPortalSearchMetadata(doc);
+      persistNow({ flushRich: false });
+      if (doc.id === activeId) renderActive();
+      portalOperationResult("문서 이름을 변경했습니다.", { undoAvailable: true }, targetWindow);
+      return;
+    }
+    if (message.type === "toggle-favorite") {
+      const ids = new Set(safeArray(payload.docIds));
+      const affected = documents.filter((doc) => ids.has(doc.id));
+      if (!affected.length) throw new Error("No documents selected");
+      pushPortalOperationSnapshot("toggle-favorite");
+      const next = !affected.every((doc) => doc.favorite);
+      affected.forEach((doc) => { doc.favorite = next; doc.updatedAt = nowIso; });
+      persistNow({ flushRich: false });
+      portalOperationResult(`${affected.length}개 문서의 즐겨찾기를 변경했습니다.`, { undoAvailable: true }, targetWindow);
+      return;
+    }
+    if (message.type === "trash-documents" || message.type === "restore-documents") {
+      const ids = new Set(safeArray(payload.docIds));
+      const affected = documents.filter((doc) => ids.has(doc.id));
+      if (!affected.length) throw new Error("No documents selected");
+      const restoring = message.type === "restore-documents";
+      pushPortalOperationSnapshot(restoring ? "restore-documents" : "trash-documents");
+      affected.forEach((doc) => { doc.deletedAt = restoring ? null : Date.now(); doc.updatedAt = nowIso; });
+      if (!restoring && ids.has(activeId)) {
+        const next = documents.find((doc) => !doc.deletedAt);
+        if (next) activeId = next.id;
+      }
+      persistNow({ flushRich: false });
+      renderActive();
+      portalOperationResult(restoring ? `${affected.length}개 문서를 복원했습니다.` : `${affected.length}개 문서를 휴지통으로 이동했습니다.`, { undoAvailable: true }, targetWindow);
+      return;
+    }
+    if (message.type === "create-folder") {
+      const name = String(payload.name || "").trim();
+      const parentId = payload.parentId && folders.some((folder) => folder.id === payload.parentId) ? payload.parentId : null;
+      if (!name) throw new Error("Folder name is required");
+      pushPortalOperationSnapshot("create-folder");
+      folders.push({ id: crypto.randomUUID(), name, parentId, createdAt: nowIso, updatedAt: nowIso });
+      persistNow({ flushRich: false });
+      portalOperationResult("새 폴더를 만들었습니다.", { undoAvailable: true }, targetWindow);
+      return;
+    }
+    if (message.type === "rename-folder") {
+      const folder = folders.find((item) => item.id === payload.folderId);
+      const name = String(payload.name || "").trim();
+      if (!folder || !name) throw new Error("Folder rename request is invalid");
+      pushPortalOperationSnapshot("rename-folder");
+      folder.name = name;
+      folder.updatedAt = nowIso;
+      persistNow({ flushRich: false });
+      portalOperationResult("폴더 이름을 변경했습니다.", { undoAvailable: true }, targetWindow);
+      return;
+    }
+  } catch (error) {
+    portalOperationError(error, targetWindow);
+  }
+}
+
+function initPortalLibraryBridge() {
+  if ("BroadcastChannel" in window) {
+    portalLibraryChannel = new BroadcastChannel(PORTAL_CHANNEL_NAME);
+    portalLibraryChannel.addEventListener("message", (event) => handlePortalLibraryMessage(event.data));
+  }
+  window.addEventListener("message", (event) => {
+    if (event.origin !== location.origin) return;
+    handlePortalLibraryMessage(event.data, event.source);
+  });
+}
+
+function rememberDetachedRequest(requestId) {
+  if (!requestId) return true;
+  if (detachedSeenRequestIds.has(requestId)) return false;
+  detachedSeenRequestIds.add(requestId);
+  if (detachedSeenRequestIds.size > 300) detachedSeenRequestIds.delete(detachedSeenRequestIds.values().next().value);
+  return true;
+}
+
+function isDocumentDetached(documentId) {
+  return Boolean(documentId && detachedEditorLeases.has(documentId));
+}
+
+function getDetachedDocumentSnapshot(documentId, lease = detachedEditorLeases.get(documentId)) {
+  const doc = documents.find((item) => item.id === documentId && !item.deletedAt);
+  if (!doc) return null;
+  return {
+    documentId: doc.id,
+    windowId: lease?.windowId || null,
+    title: doc.title || "Untitled",
+    content: doc.content || htmlToMarkdown(doc.contentHtml || ""),
+    contentHtml: sanitizeRichHtml(doc.contentHtml || markdownToHtml(doc.content || "")),
+    updatedAt: doc.updatedAt,
+    theme: getStoredTheme(),
+    viewState: lease?.viewState || null,
+    authority: "main-window",
+  };
+}
+
+function sendDetachedEditorMessage(type, payload = {}, targetWindow = null) {
+  const message = { source: "textforge-main", type, payload };
+  if (targetWindow && !targetWindow.closed) {
+    targetWindow.postMessage(message, location.origin);
+    return;
+  }
+  if (detachedEditorChannel) detachedEditorChannel.postMessage(message);
+}
+
+function applyDetachedOwnershipUi() {
+  const lease = detachedEditorLeases.get(activeId);
+  const locked = Boolean(lease);
+  els.richEditor?.setAttribute("contenteditable", locked ? "false" : "true");
+  if (els.editor) els.editor.readOnly = locked;
+  if (els.titleInput) els.titleInput.readOnly = locked;
+  els.editorGrid?.classList.toggle("detached-readonly", locked);
+  els.editorGrid?.setAttribute("data-detached-owner", locked ? "detached-window" : "main-window");
+  renderReferencePane();
+}
+
+function releaseDetachedLease(documentId, windowId, options = {}) {
+  const lease = detachedEditorLeases.get(documentId);
+  if (!lease || (windowId && lease.windowId !== windowId)) return false;
+  detachedEditorLeases.delete(documentId);
+  applyDetachedOwnershipUi();
+  if (options.reattach) {
+    window.dispatchEvent(new CustomEvent("textforge:detached-reattach", {
+      detail: { documentId, originalTabIndex: lease.originalTabIndex, viewState: options.viewState || lease.viewState || null },
+    }));
+    window.focus();
+  }
+  window.dispatchEvent(new CustomEvent("textforge:detached-state-change", { detail: { documentId, detached: false } }));
+  return true;
+}
+
+function openDetachedEditor(documentId = activeId, options = {}) {
+  flushRichDocumentNow("before-detach");
+  flushReferenceDocumentNow("before-detach");
+  const doc = documents.find((item) => item.id === documentId && !item.deletedAt);
+  if (!doc) return { ok: false, reason: "missing-document" };
+  const existing = detachedEditorLeases.get(doc.id);
+  if (existing?.window && !existing.window.closed) {
+    existing.window.focus();
+    setSessionText("This document is already open in a detached editor.");
+    return { ok: false, reason: "already-detached", windowId: existing.windowId };
+  }
+  if (doc.id === getPane("reference")?.documentId && referenceDocumentDirty) flushReferenceDocumentNow("before-detach-reference");
+  const windowId = crypto.randomUUID();
+  const url = `detached-editor.html?documentId=${encodeURIComponent(doc.id)}&windowId=${encodeURIComponent(windowId)}`;
+  const popup = window.open(url, `textforge-detached-${doc.id}`, "popup=yes,width=980,height=760,resizable=yes,scrollbars=no");
+  if (!popup) {
+    setSessionText("Detached editor popup was blocked. Allow popups for 127.0.0.1.");
+    return { ok: false, reason: "popup-blocked" };
+  }
+  const lease = {
+    documentId: doc.id,
+    windowId,
+    window: popup,
+    originalTabIndex: Number.isInteger(options.originalTabIndex) ? options.originalTabIndex : null,
+    viewState: options.viewState || null,
+    lastSeenAt: Date.now(),
+  };
+  detachedEditorLeases.set(doc.id, lease);
+  applyDetachedOwnershipUi();
+  popup.focus();
+  setSessionText(`Editing ownership moved to detached window: ${doc.title || "Untitled"}`);
+  window.dispatchEvent(new CustomEvent("textforge:detached-state-change", { detail: { documentId: doc.id, detached: true, windowId } }));
+  setTimeout(() => sendDetachedEditorMessage("document-state", getDetachedDocumentSnapshot(doc.id, lease), popup), 160);
+  return { ok: true, documentId: doc.id, windowId };
+}
+
+async function handleDetachedEditorMessage(message, targetWindow = null) {
+  if (!message || message.source !== "textforge-detached" || !rememberDetachedRequest(message.requestId)) return;
+  const payload = message.payload || {};
+  const documentId = String(payload.documentId || "");
+  const windowId = String(payload.windowId || "");
+  const doc = documents.find((item) => item.id === documentId && !item.deletedAt);
+  if (!doc) {
+    sendDetachedEditorMessage("error", { documentId, windowId, message: "Document is no longer available." }, targetWindow);
+    return;
+  }
+  let lease = detachedEditorLeases.get(documentId);
+  if (message.type === "hello" || message.type === "request-state") {
+    if (lease && lease.windowId !== windowId) {
+      sendDetachedEditorMessage("ownership-denied", { documentId, windowId, message: "Another detached window owns this document." }, targetWindow);
+      return;
+    }
+    if (!lease) {
+      lease = { documentId, windowId, window: targetWindow, originalTabIndex: null, viewState: payload.viewState || null, lastSeenAt: Date.now() };
+      detachedEditorLeases.set(documentId, lease);
+      applyDetachedOwnershipUi();
+    }
+    lease.window = targetWindow || lease.window;
+    lease.lastSeenAt = Date.now();
+    sendDetachedEditorMessage("document-state", getDetachedDocumentSnapshot(documentId, lease), targetWindow);
+    return;
+  }
+  if (!lease || lease.windowId !== windowId) {
+    sendDetachedEditorMessage("ownership-denied", { documentId, windowId, message: "Editing ownership is not available." }, targetWindow);
+    return;
+  }
+  lease.lastSeenAt = Date.now();
+  if (message.type === "heartbeat") {
+    sendDetachedEditorMessage("heartbeat", { documentId, windowId, updatedAt: doc.updatedAt }, targetWindow);
+    return;
+  }
+  if (message.type === "preview-request") {
+    const previewRequestId = safeString(payload.previewRequestId);
+    const item = payload.item && typeof payload.item === "object" ? payload.item : null;
+    const itemId = safeString(item?.id || item?.docId || item?.snapshotId);
+    if (!previewRequestId || !item || !itemId || !["document", "version"].includes(item.type || "document")) {
+      sendDetachedEditorMessage("preview-response", { documentId, windowId, previewRequestId, preview: { available: false, title: "Unavailable", contentHtml: "<p>Invalid preview request.</p>" } }, targetWindow);
+      return;
+    }
+    const preview = getExperiencePreview({ ...item, source: "detached" });
+    sendDetachedEditorMessage("preview-response", { documentId, windowId, previewRequestId, preview }, targetWindow);
+    return;
+  }
+  if (message.type === "save-document") {
+    if (payload.baseUpdatedAt && payload.baseUpdatedAt !== doc.updatedAt) {
+      sendDetachedEditorMessage("stale", getDetachedDocumentSnapshot(documentId, lease), targetWindow);
+      return;
+    }
+    const before = doc.content;
+    if (payload.mode === "source") {
+      doc.content = safeString(payload.content);
+      doc.contentHtml = markdownToHtml(doc.content);
+    } else {
+      doc.contentHtml = sanitizeRichHtml(safeString(payload.contentHtml) || "<p></p>");
+      doc.content = htmlToMarkdown(doc.contentHtml);
+    }
+    const title = safeString(payload.title).trim();
+    if (title) doc.title = title.slice(0, 300);
+    doc.updatedAt = new Date().toISOString();
+    refreshDocDerived(doc);
+    maybeAutoSnapshot(doc, before);
+    lease.viewState = payload.viewState && typeof payload.viewState === "object" ? payload.viewState : lease.viewState;
+    persistNow({ flushRich: false });
+    if (doc.id === activeId) {
+      els.titleInput.value = doc.title;
+      els.editor.value = doc.content;
+      setRichEditorHtmlPrepared(doc.contentHtml);
+      applyDetachedOwnershipUi();
+    }
+    scheduleReferencePaneRender(0);
+    sendDetachedEditorMessage("save-ack", getDetachedDocumentSnapshot(documentId, lease), targetWindow);
+    window.dispatchEvent(new CustomEvent("textforge:document-content-change", { detail: { id: doc.id, source: "detached-window" } }));
+    return;
+  }
+  if (message.type === "reattach") {
+    sendDetachedEditorMessage("reattach-ack", { documentId, windowId }, targetWindow);
+    releaseDetachedLease(documentId, windowId, { reattach: true, viewState: payload.viewState });
+    return;
+  }
+  if (message.type === "release") releaseDetachedLease(documentId, windowId, { viewState: payload.viewState });
+}
+
+function initDetachedEditorBridge() {
+  if ("BroadcastChannel" in window) {
+    detachedEditorChannel = new BroadcastChannel(DETACHED_CHANNEL_NAME);
+    detachedEditorChannel.addEventListener("message", (event) => handleDetachedEditorMessage(event.data));
+  }
+  window.addEventListener("message", (event) => {
+    if (event.origin !== location.origin) return;
+    handleDetachedEditorMessage(event.data, event.source);
+  });
+  detachedEditorHeartbeatTimer = setInterval(() => {
+    const now = Date.now();
+    detachedEditorLeases.forEach((lease, documentId) => {
+      if (lease.window?.closed || now - lease.lastSeenAt > 9000) {
+        releaseDetachedLease(documentId, lease.windowId);
+        return;
+      }
+      sendDetachedEditorMessage("main-heartbeat", { documentId, windowId: lease.windowId, updatedAt: documents.find((doc) => doc.id === documentId)?.updatedAt || null }, lease.window);
+    });
+  }, 2000);
 }
 
 function openForgeSnapshotPanel() {
   window.ForgeSnapshot?.openForgeSnapshotDialog({
     getDocuments: () => documents.map((doc) => ({ ...doc })),
     getFolders: () => folders.map((folder) => ({ ...folder })),
-    getSelectedIds: () => [...finderState.selectedIds],
-    getCurrentFolderId: () => finderState.folderId,
+    getSelectedIds: () => activeId ? [activeId] : [],
+    getCurrentFolderId: () => activeDoc()?.folderId || null,
   });
 }
 
@@ -2080,6 +3029,7 @@ function setInspectorOpen(open, tab = inspectorTab) {
   localStorage.setItem("textforge.inspectorOpen", String(inspectorOpen));
   localStorage.setItem("textforge.inspectorTab", inspectorTab);
   renderInspectorState();
+  window.dispatchEvent(new CustomEvent("textforge:inspector-change", { detail: { open: inspectorOpen, tab: inspectorTab } }));
   if (!inspectorOpen) return;
   if (inspectorTab === "toc") renderToc();
   if (inspectorTab === "history") renderHistory();
@@ -2092,9 +3042,7 @@ function renderInspectorState() {
   els.inspector?.classList.toggle("collapsed", !inspectorOpen);
   els.contentArea?.classList.toggle("inspector-collapsed", !inspectorOpen);
   els.inspectorToggleBtn?.classList.toggle("active", inspectorOpen);
-  document.querySelectorAll(".inspector-tab").forEach((button) => {
-    button.classList.toggle("active", button.dataset.inspectorTab === inspectorTab);
-  });
+  els.inspectorToggleBtn?.setAttribute("aria-expanded", String(inspectorOpen));
   document.querySelectorAll(".inspector-panel").forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.inspectorPanel === inspectorTab);
   });
@@ -2194,260 +3142,6 @@ function initPwaInstallHints() {
   });
 }
 
-function closeFinder() {
-  els.appShell.classList.remove("finder-active");
-  hideDocContextMenu();
-}
-
-function renderFinder() {
-  renderFinderSidebar();
-  const all = getFinderDocuments();
-  const maxPage = Math.max(0, Math.ceil(all.length / finderState.pageSize) - 1);
-  finderState.page = Math.min(finderState.page, maxPage);
-  const start = finderState.page * finderState.pageSize;
-  const visible = all.slice(start, start + finderState.pageSize);
-  els.finderAllCount.textContent = String(documents.filter((doc) => !doc.deletedAt).length);
-  els.finderCrumbs.textContent = getFinderCrumbText(all.length);
-  els.finderGrid.classList.toggle("list-view", finderState.view === "list");
-  els.finderGrid.classList.toggle("selecting", finderState.selecting);
-  els.finderGrid.innerHTML = "";
-
-  if (!documents.length) {
-    els.finderGrid.innerHTML = '<div class="empty-library">새 문서를 만들어 TextForge를 시작하세요.</div>';
-  } else if (!all.length) {
-    els.finderGrid.innerHTML = '<div class="empty-library">검색 결과가 없습니다.</div>';
-  } else {
-    const fragment = document.createDocumentFragment();
-    visible.forEach((doc) => fragment.append(createDocCard(doc)));
-    els.finderGrid.append(fragment);
-  }
-
-  els.finderPageText.textContent = `${all.length ? finderState.page + 1 : 0} / ${Math.max(1, maxPage + 1)}`;
-  els.finderPrevBtn.disabled = finderState.page <= 0;
-  els.finderNextBtn.disabled = finderState.page >= maxPage;
-  renderBulkBar();
-}
-
-function getFinderDocuments() {
-  const query = finderState.query.trim().toLowerCase();
-  return documents
-    .filter((doc) => {
-      if (finderState.filter === "trash") return Boolean(doc.deletedAt);
-      if (doc.deletedAt) return false;
-      if (finderState.filter === "favorites" && !doc.favorite) return false;
-      if (finderState.filter === "prompts" && doc.type !== "prompt") return false;
-      if (finderState.filter === "recent" && Date.now() - new Date(doc.updatedAt).getTime() > 1000 * 60 * 60 * 24 * 30) return false;
-      if (finderState.tag && !doc.tags.includes(finderState.tag)) return false;
-      if (finderState.folderId !== undefined && finderState.folderId !== null && doc.folderId !== finderState.folderId) return false;
-      if (!query) return true;
-      return (doc.searchText || doc._searchText || "").includes(query);
-    })
-    .sort(sortFinderDocs);
-}
-
-function sortFinderDocs(a, b) {
-  if (finderState.sort === "created") return new Date(b.createdAt) - new Date(a.createdAt);
-  if (finderState.sort === "title") return a.title.localeCompare(b.title, "ko");
-  if (finderState.sort === "favorite") return Number(b.favorite) - Number(a.favorite) || new Date(b.updatedAt) - new Date(a.updatedAt);
-  if (finderState.sort === "chars") return (b.charCount || 0) - (a.charCount || 0);
-  return new Date(b.updatedAt) - new Date(a.updatedAt);
-}
-
-function getFinderCrumbText(count) {
-  if (finderState.filter === "trash") return `휴지통 · ${count}`;
-  if (finderState.tag) return `태그 #${finderState.tag} · ${count}`;
-  if (finderState.folderId) return `${folders.find((folder) => folder.id === finderState.folderId)?.name || "폴더"} · ${count}`;
-  if (finderState.filter === "favorites") return `즐겨찾기 · ${count}`;
-  if (finderState.filter === "prompts") return `프롬프트 보관함 · ${count}`;
-  if (finderState.filter === "recent") return `최근 문서 · ${count}`;
-  return `전체 문서 · ${count}`;
-}
-
-function createDocCard(doc) {
-  const card = document.createElement("button");
-  card.type = "button";
-  const typeLabels = { note: "메모", prompt: "프롬프트", report: "보고서", board: "게시글", log: "로그" };
-  card.className = `doc-card${doc.id === activeId ? " active" : ""}${finderState.selectedIds.has(doc.id) ? " selected" : ""}`;
-  card.draggable = true;
-  card.dataset.docId = doc.id;
-  card.style.setProperty("--card-color", doc.color || DOC_COLORS[0]);
-  const tagHtml = doc.tags.slice(0, 4).map((tag) => `<span>#${escapeHtml(tag)}</span>`).join("");
-  card.innerHTML = `
-    <span class="doc-check">${finderState.selectedIds.has(doc.id) ? "✓" : ""}</span>
-    <div class="doc-card-head">
-      <span class="doc-type">${escapeHtml(typeLabels[doc.type] || "메모")}</span>
-      <span class="doc-star">${doc.favorite ? "★" : "☆"}</span>
-    </div>
-    <div class="doc-card-title">${escapeHtml(doc.title)}</div>
-    <div class="doc-card-preview">${highlightSnippet(doc.previewText || doc._summary || "", finderState.query)}</div>
-    <div class="doc-card-tags">${tagHtml}</div>
-    <div class="doc-card-meta"><span>${formatHistoryTime(doc.updatedAt)}</span><span>${(doc.charCount || 0).toLocaleString("ko-KR")}자</span></div>
-  `;
-  card.addEventListener("click", () => {
-    if (finderState.selecting) {
-      toggleFinderSelection(doc.id);
-      return;
-    }
-    openDocumentFromFinder(doc.id);
-  });
-  card.addEventListener("dragstart", (event) => {
-    event.dataTransfer.setData("text/plain", doc.id);
-    event.dataTransfer.effectAllowed = "move";
-  });
-  card.addEventListener("contextmenu", (event) => {
-    event.preventDefault();
-    showDocContextMenu(event, doc.id);
-  });
-  return card;
-}
-function highlightSnippet(text, query) {
-  const safe = escapeHtml(text || "빈 문서");
-  if (!query.trim()) return safe;
-  const term = escapeRegex(query.trim().split(/\s+/)[0]);
-  return safe.replace(new RegExp(`(${term})`, "ig"), "<mark>$1</mark>");
-}
-
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function openDocumentFromFinder(docId) {
-  if (splitWorkspace.layout !== "single" && splitWorkspace.activePaneId === "reference") {
-    openDocumentInPane(docId, "reference", { mode: getPane("reference")?.mode || "readonly", lockedScroll: getPane("reference")?.lockedScroll, source: "finder" });
-  } else {
-    openDocumentInPane(docId, "main", { source: "finder" });
-  }
-  closeFinder();
-}
-
-function renderFinderSidebar() {
-  document.querySelectorAll(".finder-nav").forEach((button) => {
-    button.classList.toggle("active", button.dataset.filter === finderState.filter && !finderState.tag && finderState.folderId === null);
-  });
-
-  const tags = [...new Set(documents.flatMap((doc) => (doc.deletedAt ? [] : doc.tags)))].sort((a, b) => a.localeCompare(b, "ko"));
-  els.finderTagList.innerHTML = tags.length
-    ? tags.map((tag) => `<button class="tag-filter${finderState.tag === tag ? " active" : ""}" data-tag="${escapeHtml(tag)}" type="button">#${escapeHtml(tag)}</button>`).join("")
-    : '<span class="empty-note">제목을 쓰면 목차가 생깁니다.</span>';
-
-  els.finderFolderList.innerHTML = folders.length
-    ? folders.map((folder) => `<button class="folder-drop${finderState.folderId === folder.id ? " active" : ""}" data-folder-id="${folder.id}" type="button">${escapeHtml(folder.name)}<span>${documents.filter((doc) => !doc.deletedAt && doc.folderId === folder.id).length}</span></button>`).join("")
-    : '<span class="empty-note">폴더 없음</span>';
-}
-
-function scheduleFinderRender() {
-  clearTimeout(finderSearchTimer);
-  finderSearchTimer = setTimeout(() => {
-    finderState.query = els.finderSearchInput.value;
-    finderState.page = 0;
-    requestAnimationFrame(renderFinder);
-  }, 180);
-}
-
-function toggleFinderSelection(docId) {
-  if (finderState.selectedIds.has(docId)) finderState.selectedIds.delete(docId);
-  else finderState.selectedIds.add(docId);
-  renderFinder();
-}
-
-function setFinderSelecting(enabled) {
-  finderState.selecting = enabled;
-  if (!enabled) finderState.selectedIds.clear();
-  els.finderSelectBtn.classList.toggle("active", enabled);
-  renderFinder();
-}
-
-function renderBulkBar() {
-  const count = finderState.selectedIds.size;
-  els.finderBulkBar.classList.toggle("hidden", !finderState.selecting);
-    els.finderSelectionCount.textContent = `${count}개 선택됨`;
-  els.finderBulkFolderSelect.innerHTML = `<option value="">폴더 없음</option>${folders
-    .map((folder) => `<option value="${folder.id}">${escapeHtml(folder.name)}</option>`)
-    .join("")}`;
-  els.finderBulkMoveBtn.disabled = count === 0;
-  els.finderBulkTrashBtn.disabled = count === 0;
-}
-
-function bulkMoveSelected() {
-  if (!finderState.selectedIds.size) return;
-  const folderId = els.finderBulkFolderSelect.value || null;
-  documents.forEach((doc) => {
-    if (finderState.selectedIds.has(doc.id)) {
-      doc.folderId = folderId;
-      doc.updatedAt = new Date().toISOString();
-      refreshDocDerived(doc);
-    }
-  });
-  finderState.selectedIds.clear();
-  persistNow();
-  renderFinder();
-}
-
-function bulkTrashSelected() {
-  if (!finderState.selectedIds.size) return;
-  documents.forEach((doc) => {
-    if (finderState.selectedIds.has(doc.id)) {
-      doc.deletedAt = Date.now();
-      doc.updatedAt = new Date().toISOString();
-    }
-  });
-  finderState.selectedIds.clear();
-  persistNow();
-  renderFinder();
-}
-
-function createFolder() {
-  const name = prompt("폴더 이름");
-  if (!name?.trim()) return;
-  folders.push({ id: crypto.randomUUID(), name: name.trim(), parentId: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
-  persistNow();
-  renderFinder();
-}
-
-function editFolder(folderId) {
-  const folder = folders.find((item) => item.id === folderId);
-  if (!folder) return;
-  const next = prompt("폴더 이름을 바꿀까요? 비우면 삭제합니다.", folder.name);
-  if (next === null) return;
-  if (!next.trim()) {
-    folders = folders.filter((item) => item.id !== folderId);
-    documents.forEach((doc) => {
-      if (doc.folderId === folderId) {
-        doc.folderId = null;
-        doc.updatedAt = new Date().toISOString();
-        refreshDocDerived(doc);
-      }
-    });
-    if (finderState.folderId === folderId) finderState.folderId = null;
-  } else {
-    folder.name = next.trim();
-    folder.updatedAt = new Date().toISOString();
-  }
-  persistNow();
-  renderFinder();
-}
-
-function moveDocumentToFolder(docId, folderId) {
-  const doc = documents.find((item) => item.id === docId);
-  if (!doc) return;
-  doc.folderId = folderId;
-  doc.updatedAt = new Date().toISOString();
-  refreshDocDerived(doc);
-  persistNow();
-  renderFinder();
-}
-
-function showDocContextMenu(event, docId) {
-  finderState.contextDocId = docId;
-  els.docContextMenu.style.left = `${event.clientX}px`;
-  els.docContextMenu.style.top = `${event.clientY}px`;
-  els.docContextMenu.classList.remove("hidden");
-}
-
-function hideDocContextMenu() {
-  els.docContextMenu.classList.add("hidden");
-}
-
 function closeOpenToolbarMenus(except = null) {
   document.querySelectorAll("details.menu-wrap[open]").forEach((menu) => {
     if (menu !== except) menu.removeAttribute("open");
@@ -2456,12 +3150,10 @@ function closeOpenToolbarMenus(except = null) {
 
 function closeFloatingUi(exceptMenu = null) {
   closeOpenToolbarMenus(exceptMenu);
-  hideDocContextMenu();
 }
 
 function initFloatingUiDismiss() {
   document.addEventListener("pointerdown", (event) => {
-    if (els.docContextMenu.contains(event.target)) return;
     const openMenu = event.target.closest?.("details.menu-wrap");
     closeFloatingUi(openMenu || null);
   });
@@ -2472,60 +3164,62 @@ function initFloatingUiDismiss() {
   }, true);
 }
 
-async function runDocContextAction(action) {
-  const doc = documents.find((item) => item.id === finderState.contextDocId);
-  if (!doc) return;
-  if (action === "open") openDocumentFromFinder(doc.id);
-  if (action === "open-right") {
-    openDocumentInNewPane(doc.id, { mode: "readonly", lockedScroll: true });
-    closeFinder();
-  }
-  if (action === "rename") {
-    const title = prompt("문서 제목", doc.title);
-    if (title?.trim()) {
-      doc.title = title.trim();
-      doc.updatedAt = new Date().toISOString();
-      refreshDocDerived(doc);
-      persistNow();
-      renderFinder();
+function getTopOpenModal() {
+  return [...document.querySelectorAll(".snapshot-dialog:not(.hidden)")].at(-1) || null;
+}
+
+function closeModalOverlay(dialog = getTopOpenModal()) {
+  if (!dialog) return false;
+  if (dialog.id === "forgeSnapshotDialog") window.ForgeSnapshot?.closeForgeSnapshotDialog?.();
+  else if (dialog.id === "diagnosticsDialog") window.TextForgeDiagnostics?.closeDiagnosticsPanel?.();
+  else dialog.classList.add("hidden");
+  return true;
+}
+
+function initModalAccessibility() {
+  const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+  const returnFocusByDialog = new WeakMap();
+  document.querySelectorAll(".snapshot-dialog").forEach((dialog) => {
+    dialog.addEventListener("pointerdown", (event) => {
+      if (event.target === dialog) closeModalOverlay(dialog);
+    });
+    const observer = new MutationObserver(() => {
+      if (!dialog.classList.contains("hidden")) {
+        if (document.activeElement && !dialog.contains(document.activeElement)) returnFocusByDialog.set(dialog, document.activeElement);
+        requestAnimationFrame(() => dialog.querySelector(focusableSelector)?.focus({ preventScroll: true }));
+        return;
+      }
+      const returnTarget = returnFocusByDialog.get(dialog);
+      returnFocusByDialog.delete(dialog);
+      if (returnTarget?.isConnected) requestAnimationFrame(() => returnTarget.focus({ preventScroll: true }));
+    });
+    observer.observe(dialog, { attributes: true, attributeFilter: ["class"] });
+  });
+  document.addEventListener("keydown", (event) => {
+    const dialog = getTopOpenModal();
+    if (!dialog) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      closeModalOverlay(dialog);
+      return;
     }
-  }
-  if (action === "duplicate") {
-    const copy = refreshDocDerived({ ...doc, id: crypto.randomUUID(), title: `${doc.title} copy`, favorite: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
-    documents.unshift(copy);
-    persistNow();
-    renderFinder();
-  }
-  if (action === "favorite") {
-    doc.favorite = !doc.favorite;
-    doc.updatedAt = new Date().toISOString();
-    refreshDocDerived(doc);
-    persistNow();
-    renderFinder();
-  }
-  if (action === "tags") {
-    const tags = prompt("태그를 쉼표로 구분해 입력하세요.", doc.tags.join(", "));
-    if (tags !== null) {
-      doc.tags = tags.split(",").map((tag) => tag.trim().replace(/^#/, "")).filter(Boolean).slice(0, 8);
-      doc.updatedAt = new Date().toISOString();
-      refreshDocDerived(doc);
-      persistNow();
-      renderFinder();
+    if (event.key !== "Tab") return;
+    const focusable = [...dialog.querySelectorAll(focusableSelector)].filter((node) => !node.hidden && node.getClientRects().length > 0);
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (!dialog.contains(document.activeElement)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    } else if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
     }
-  }
-  if (action === "plain") await navigator.clipboard.writeText(doc.plainText || "");
-  if (action === "markdown") await navigator.clipboard.writeText(doc.content || htmlToMarkdown(doc.contentHtml || ""));
-  if (action === "board") await navigator.clipboard.writeText(htmlToPlain(doc.contentHtml || "", "board"));
-  if (action === "html") {
-    activeId = doc.id;
-    exportFile("html");
-  }
-  if (action === "trash") {
-    doc.deletedAt = Date.now();
-    doc.updatedAt = new Date().toISOString();
-    persistNow();
-    renderFinder();
-  }
+  }, true);
 }
 
 function renderPreview(options = {}) {
@@ -2602,6 +3296,69 @@ function flushRichDocumentNow(reason = "manual", options = {}) {
     renderPreviewNow: options.renderPreviewNow ?? false,
     updateStatsNow: options.updateStatsNow ?? false,
   });
+}
+
+function captureReferenceViewState() {
+  const pane = getPane("reference");
+  if (!pane) return null;
+  savePaneScroll("reference");
+  if (pane.mode === "source") {
+    pane.selection = { kind: "source", start: els.referenceSourceEditor?.selectionStart || 0, end: els.referenceSourceEditor?.selectionEnd || 0 };
+  } else if (pane.mode === "rich" && !referenceCompositionActive) {
+    pane.selection = captureSelectionForRoot(els.referencePaneBody);
+  }
+  return { mode: pane.mode, scrollTop: pane.scrollTop || 0, selection: pane.selection || null };
+}
+
+function scheduleReferenceDocumentSync(reason = "reference-input", delay = 900) {
+  clearTimeout(referenceFullSyncTimer);
+  referenceFullSyncTimer = setTimeout(() => flushReferenceDocumentNow(reason), delay);
+}
+
+function syncReferenceDocumentFast(mode = getPane("reference")?.mode) {
+  const pane = getPane("reference");
+  const doc = documents.find((item) => item.id === pane?.documentId && !item.deletedAt);
+  if (!pane || !doc || pane.readonly || doc.id === activeId || isDocumentDetached(doc.id)) return null;
+  if (mode === "source") doc.content = els.referenceSourceEditor.value;
+  else doc.contentHtml = els.referencePaneBody.innerHTML;
+  doc.updatedAt = new Date().toISOString();
+  referenceDocumentDirty = true;
+  referenceDirtyDocumentId = doc.id;
+  els.saveState.textContent = "Saving...";
+  captureReferenceViewState();
+  scheduleReferenceDocumentSync("reference-input", 900);
+  persistSoon({ delay: 1400, flushRich: false });
+  return doc;
+}
+
+function flushReferenceDocumentNow(reason = "manual") {
+  if (!referenceDocumentDirty) return documents.find((item) => item.id === referenceDirtyDocumentId) || null;
+  clearTimeout(referenceFullSyncTimer);
+  referenceFullSyncTimer = null;
+  const pane = getPane("reference");
+  const doc = documents.find((item) => item.id === referenceDirtyDocumentId && item.id === pane?.documentId && !item.deletedAt);
+  if (!doc || pane.readonly || doc.id === activeId || isDocumentDetached(doc.id)) {
+    referenceDocumentDirty = false;
+    referenceDirtyDocumentId = null;
+    return doc || null;
+  }
+  const before = doc.content;
+  if (pane.mode === "source") {
+    doc.content = els.referenceSourceEditor.value;
+    doc.contentHtml = markdownToHtml(doc.content);
+  } else {
+    doc.contentHtml = sanitizeRichHtml(els.referencePaneBody.innerHTML);
+    doc.content = htmlToMarkdown(doc.contentHtml);
+  }
+  doc.updatedAt = new Date().toISOString();
+  refreshDocDerived(doc);
+  maybeAutoSnapshot(doc, before);
+  referenceDocumentDirty = false;
+  referenceDirtyDocumentId = null;
+  captureReferenceViewState();
+  persistSoon({ delay: reason === "beforeunload" ? 0 : 250, flushRich: false });
+  window.dispatchEvent(new CustomEvent("textforge:document-content-change", { detail: { id: doc.id, source: "reference-pane" } }));
+  return doc;
 }
 
 function syncRichToDocumentFast(event = null) {
@@ -2851,6 +3608,8 @@ function renderHistory() {
     const item = document.createElement("button");
     item.type = "button";
     item.className = "history-item";
+    item.dataset.snapshotId = snapshot.id;
+    item.dataset.docId = doc.id;
     item.innerHTML = `${escapeHtml(snapshot.label)}<span>${formatHistoryTime(snapshot.createdAt)} · ${(snapshot.content || "").length.toLocaleString("ko-KR")}자</span>`;
     item.addEventListener("click", () => restoreSnapshot(snapshot.id));
     els.historyList.append(item);
@@ -2861,13 +3620,16 @@ function restoreSnapshot(snapshotId) {
   const snapshot = doc?.history.find((item) => item.id === snapshotId);
   if (!doc || !snapshot) return;
 
+  const before = captureActiveDocumentState("restore-version");
   addSnapshot(doc, "복구 직전");
   doc.title = snapshot.title;
   doc.content = snapshot.content;
   doc.contentHtml = snapshot.contentHtml || markdownToHtml(snapshot.content || "");
   doc.updatedAt = new Date().toISOString();
+  refreshDocDerived(doc);
   persistNow();
   renderActive();
+  pushBulkOperationUndoState("restore-version", before);
 }
 
 function extractHeadings(markdown) {
@@ -2943,9 +3705,12 @@ function renderSystemPanel() {
   const longLine = longestLine(htmlToPlain(doc.contentHtml || markdownToHtml(doc.content || "")));
   const pluginNames = textPipelines.map((pipe) => pipe.name).join(", ");
 
+  const backlinkItems = backlinks.length
+    ? backlinks.map((item, index) => `<button class="backlink-item" type="button" data-backlink-doc-id="${escapeAttr(item.id)}" data-backlink-index="${index}" aria-label="${escapeAttr(item.title || "Untitled")} 백링크 출처">${escapeHtml(item.title || "Untitled")}${item.deletedAt ? " · 삭제됨" : ""}</button>`).join("")
+    : '<span class="empty-note">없음</span>';
   els.systemList.innerHTML = `
     <button class="system-item" type="button" data-system-action="links">문서 링크<span>${links.length ? links.map(escapeHtml).join(", ") : "없음"}</span></button>
-    <button class="system-item" type="button" data-system-action="backlinks">백링크<span>${backlinks.length ? backlinks.map((item) => escapeHtml(item.title)).join(", ") : "없음"}</span></button>
+    <div class="system-item backlink-group"><strong>백링크</strong><div class="backlink-list" role="list" aria-label="백링크 출처 문서">${backlinkItems}</div></div>
     <div class="system-item">긴 줄<span>${longLine.toLocaleString("ko-KR")}자 · ${logMode ? "로그 모드" : "일반 모드"}</span></div>
     <div class="system-item">변환 파이프라인<span>${pluginNames}</span></div>
     <div class="system-item">로컬 저장소<span>${(storageBytes / 1024).toFixed(1)} KB</span><div class="system-meter"><i style="width:${storagePercent}%"></i></div></div>
@@ -2967,13 +3732,16 @@ function renderDocInfoPanel() {
   markDocumentSwitch("before backlinks calculation");
   const backlinks = documents.filter((item) => item.id !== doc.id && extractWikiLinks(item.content || htmlToMarkdown(item.contentHtml || "")).includes(doc.title));
   markDocumentSwitch("after backlinks calculation");
+  const backlinkItems = backlinks.length
+    ? backlinks.map((item, index) => `<button class="backlink-item" type="button" data-backlink-doc-id="${escapeAttr(item.id)}" data-backlink-index="${index}" aria-label="${escapeAttr(item.title || "Untitled")} 백링크 출처">${escapeHtml(item.title || "Untitled")}${item.deletedAt ? " · 삭제됨" : ""}</button>`).join("")
+    : '<span class="empty-note">없음</span>';
   els.docInfoList.innerHTML = `
     <div class="system-item">글자 수<span>${plain.length.toLocaleString("ko-KR")}자</span></div>
     <div class="system-item">생성일<span>${formatHistoryTime(doc.createdAt)}</span></div>
     <div class="system-item">수정일<span>${formatHistoryTime(doc.updatedAt)}</span></div>
     <div class="system-item">태그<span>${doc.tags?.length ? doc.tags.map(escapeHtml).join(", ") : "없음"}</span></div>
     <div class="system-item">문서 링크<span>${links.length ? links.map(escapeHtml).join(", ") : "없음"}</span></div>
-    <div class="system-item">백링크<span>${backlinks.length ? backlinks.map((item) => escapeHtml(item.title)).join(", ") : "없음"}</span></div>
+    <div class="system-item backlink-group"><strong>백링크</strong><div class="backlink-list" role="list" aria-label="백링크 출처 문서">${backlinkItems}</div></div>
   `;
   markDocumentSwitch("renderDocInfoPanel:end");
 }
@@ -3032,12 +3800,13 @@ function setMode(mode) {
   }
   document.querySelectorAll(".mode-btn").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.mode === mode);
+    btn.setAttribute("aria-selected", String(btn.dataset.mode === mode));
   });
-  if (els.viewModeSelect) els.viewModeSelect.value = mode;
   els.editorGrid.className = `editor-grid ${mode}-mode`;
   els.editorPaneLabel.textContent = mode === "source" ? "Markdown 원문" : "리치 문서";
   if (mode !== "source") renderPreview();
   renderSplitWorkspace({ preserveScroll: true });
+  if (!compositionActive) scheduleSessionRecoverySave();
 }
 
 function markdownToHtml(markdown) {
@@ -3385,78 +4154,123 @@ function cleanAiOutput() {
   setSessionText("AI cleanup created a new document; original kept unchanged.");
 }
 
-function exportFile(kind) {
-  const doc = activeDoc();
-  if (!doc) {
-    els.copyState.textContent = "내보낼 문서가 없습니다.";
-    return;
-  }
-  if (!["txt", "md", "html", "pdf", "doc", "epub"].includes(kind)) {
-    els.copyState.textContent = "지원하지 않는 내보내기 형식입니다.";
-    return;
-  }
-  const base = sanitizeFileName(doc.title || "textforge-note");
-  if (kind === "epub") {
-    try {
-      exportEpub(doc, base);
-    } catch {
-      els.copyState.textContent = "EPUB 내보내기에 실패했습니다.";
-    }
-    return;
-  }
-  const contentByKind = {
-    txt: htmlToPlain(doc.contentHtml),
-    md: htmlToMarkdown(doc.contentHtml),
-    html: `<!doctype html><html lang="ko"><meta charset="utf-8"><title>${escapeHtml(doc.title)}</title><body>${doc.contentHtml}</body></html>`,
-    doc: `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${escapeHtml(doc.title)}</title><style>body{font-family:Malgun Gothic,Arial,sans-serif;line-height:1.65}pre{white-space:pre-wrap;background:#f0f3f6;padding:12px}</style></head><body>${doc.contentHtml}</body></html>`,
+const EXPORT_CAPABILITIES = Object.freeze({
+  txt: { label: "TXT", extension: "txt", mime: "text/plain;charset=utf-8", limitation: "Plain text only." },
+  md: { label: "Markdown", extension: "md", mime: "text/markdown;charset=utf-8", limitation: "Rich styling is represented as Markdown." },
+  html: { label: "HTML", extension: "html", mime: "text/html;charset=utf-8", limitation: "A self-contained document without external assets." },
+  doc: { label: "DOC", extension: "doc", mime: "application/msword", limitation: "HTML-based DOC for compatible word processors." },
+  pdf: { label: "PDF", extension: "pdf", mime: "application/pdf", limitation: "Uses the browser print dialog; choose Save as PDF." },
+  epub: { label: "EPUB", extension: "epub", mime: "application/epub+zip", limitation: "Uncompressed EPUB 3 package." },
+  card: { label: "PNG Card", extension: "png", mime: "image/png", limitation: "A 1200 x 675 summary card." },
+});
+
+function getExportCapabilities() {
+  return Object.entries(EXPORT_CAPABILITIES).map(([format, value]) => ({ format, ...value, available: true, canPreview: true, canSave: true, canCopy: true }));
+}
+
+function normalizeExportOptions(value = {}) {
+  return { includeTitle: value.includeTitle !== false, includeMetadata: value.includeMetadata === true };
+}
+
+function exportMetadataHtml(doc) {
+  return `<dl class="textforge-export-meta"><dt>Created</dt><dd>${escapeHtml(new Date(doc.createdAt).toLocaleString())}</dd><dt>Updated</dt><dd>${escapeHtml(new Date(doc.updatedAt).toLocaleString())}</dd><dt>Characters</dt><dd>${Number(doc.charCount || 0).toLocaleString()}</dd></dl>`;
+}
+
+function exportMetadataText(doc) {
+  return `Created: ${new Date(doc.createdAt).toLocaleString()}\nUpdated: ${new Date(doc.updatedAt).toLocaleString()}\nCharacters: ${Number(doc.charCount || 0).toLocaleString()}`;
+}
+
+function buildExportArtifact(request = {}) {
+  const format = EXPORT_CAPABILITIES[request.format] ? request.format : "md";
+  const doc = documents.find((item) => item.id === (request.documentId || activeId) && !item.deletedAt);
+  if (!doc) return { ok: false, reason: "The export document is unavailable." };
+  const options = normalizeExportOptions(request.options);
+  const cleanHtml = sanitizeRichHtml(doc.contentHtml || markdownToHtml(doc.content || ""));
+  const plainBody = htmlToPlain(cleanHtml);
+  const markdownBody = htmlToMarkdown(cleanHtml);
+  const titleHtml = options.includeTitle ? `<h1>${escapeHtml(doc.title || "Untitled")}</h1>` : "";
+  const metadataHtml = options.includeMetadata ? exportMetadataHtml(doc) : "";
+  const richBody = `${titleHtml}${metadataHtml}${cleanHtml}`;
+  const textPrefix = [options.includeTitle ? doc.title || "Untitled" : "", options.includeMetadata ? exportMetadataText(doc) : ""].filter(Boolean).join("\n\n");
+  const textContent = [textPrefix, plainBody].filter(Boolean).join("\n\n") || "\n";
+  const markdownPrefix = [options.includeTitle ? `# ${doc.title || "Untitled"}` : "", options.includeMetadata ? exportMetadataText(doc).split("\n").map((line) => `> ${line}`).join("\n") : ""].filter(Boolean).join("\n\n");
+  const markdownContent = [markdownPrefix, markdownBody].filter(Boolean).join("\n\n") || "\n";
+  const baseInput = String(request.fileName || doc.title || "textforge-note").replace(/\.[a-z0-9]{1,8}$/i, "");
+  const base = sanitizeFileName(baseInput.trim() || "textforge-note");
+  const capability = EXPORT_CAPABILITIES[format];
+  const commonStyle = "body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.7;padding:40px;max-width:820px;margin:auto}pre{white-space:pre-wrap;background:#f0f3f6;padding:12px}.textforge-export-meta{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;color:#586675;font-size:13px}.textforge-export-meta dd{margin:0}";
+  const htmlDocument = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${escapeHtml(doc.title || "Untitled")}</title><style>${commonStyle}</style></head><body>${richBody}</body></html>`;
+  const docDocument = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${escapeHtml(doc.title || "Untitled")}</title><style>${commonStyle}</style></head><body>${richBody}</body></html>`;
+  const epubContent = `<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" lang="ko"><head><title>${escapeHtml(doc.title || "Untitled")}</title><style>${commonStyle}</style></head><body>${richBody}</body></html>`;
+  const contentByFormat = { txt: textContent, md: markdownContent, html: htmlDocument, doc: docDocument, pdf: htmlDocument, epub: epubContent };
+  const previewHtml = format === "txt" || format === "md"
+    ? `<pre>${escapeHtml(contentByFormat[format])}</pre>`
+    : format === "card"
+      ? `<section class="tf-export-card-preview">${titleHtml}<p>${escapeHtml(plainBody.slice(0, 900))}</p>${options.includeMetadata ? `<small>${Number(doc.charCount || 0).toLocaleString()} characters</small>` : ""}</section>`
+      : richBody;
+  const artifact = {
+    ok: true, format, documentId: doc.id, revision: doc.updatedAt, title: doc.title || "Untitled", fileName: `${base}.${capability.extension}`,
+    mime: capability.mime, limitation: capability.limitation, options, previewHtml: sanitizeRichHtml(previewHtml), copyText: format === "md" ? markdownContent : textContent,
+    content: contentByFormat[format] || "", card: format === "card", sourceHash: `${doc.id}:${doc.updatedAt}:${doc.contentHtml.length}`,
   };
+  if (format === "epub") artifact.files = [
+    { name: "mimetype", content: "application/epub+zip" },
+    { name: "META-INF/container.xml", content: `<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>` },
+    { name: "OEBPS/package.opf", content: `<?xml version="1.0" encoding="utf-8"?><package xmlns="http://www.idpf.org/2007/opf" unique-identifier="bookid" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="bookid">textforge-${escapeHtml(doc.id)}</dc:identifier><dc:title>${escapeHtml(doc.title || "Untitled")}</dc:title><dc:language>ko</dc:language></metadata><manifest><item id="content" href="content.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="content"/></spine></package>` },
+    { name: "OEBPS/content.xhtml", content: epubContent },
+  ];
+  return artifact;
+}
 
-  if (kind === "pdf") {
-    const win = window.open("", "_blank");
-    if (!win) {
-      els.copyState.textContent = "팝업이 차단되어 PDF 내보내기를 실행할 수 없습니다.";
-      return;
-    }
-    win.document.write(`<html><head><title>${escapeHtml(doc.title)}</title><style>body{font-family:system-ui;line-height:1.7;padding:40px;max-width:820px;margin:auto}pre{white-space:pre-wrap;background:#f0f3f6;padding:12px}</style></head><body>${doc.contentHtml}</body></html>`);
-    win.document.close();
-    win.focus();
-    win.print();
-    return;
-  }
+function getExportPreview(request = {}) {
+  return buildExportArtifact(request);
+}
 
+async function copyExportDocument(request = {}) {
+  const artifact = buildExportArtifact(request);
+  if (!artifact.ok) return artifact;
   try {
-    const mime = kind === "html" || kind === "doc" ? "text/html" : "text/plain";
-    const blob = new Blob([contentByKind[kind]], { type: `${mime};charset=utf-8` });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${base}.${kind}`;
-    link.click();
-    URL.revokeObjectURL(url);
+    if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(artifact.copyText);
+    else fallbackCopy(artifact.copyText);
+    return { ok: true, message: `${artifact.fileName} content copied.`, artifact };
   } catch {
-    els.copyState.textContent = "내보내기에 실패했습니다. 문서는 그대로 보존됩니다.";
+    try { fallbackCopy(artifact.copyText); return { ok: true, message: `${artifact.fileName} content copied.`, artifact }; }
+    catch { return { ok: false, reason: "Clipboard access is unavailable.", artifact }; }
   }
 }
 
-function exportEpub(doc, base) {
-  const content = `<?xml version="1.0" encoding="utf-8"?>
-<html xmlns="http://www.w3.org/1999/xhtml" lang="ko">
-<head><title>${escapeHtml(doc.title)}</title><style>body{font-family:serif;line-height:1.7;padding:1rem}pre{white-space:pre-wrap;background:#f0f0f0;padding:.75rem}</style></head>
-<body>${doc.contentHtml}</body>
-</html>`;
-  const files = [
-    { name: "mimetype", content: "application/epub+zip" },
-    { name: "META-INF/container.xml", content: `<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/package.opf" media-type="application/oebps-package+xml"/></rootfiles></container>` },
-    { name: "OEBPS/package.opf", content: `<?xml version="1.0" encoding="utf-8"?><package xmlns="http://www.idpf.org/2007/opf" unique-identifier="bookid" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="bookid">textforge-${doc.id}</dc:identifier><dc:title>${escapeHtml(doc.title)}</dc:title><dc:language>ko</dc:language></metadata><manifest><item id="content" href="content.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="content"/></spine></package>` },
-    { name: "OEBPS/content.xhtml", content },
-  ];
-  const blob = new Blob([makeZip(files)], { type: "application/epub+zip" });
+function downloadExportBlob(blob, fileName) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${base}.epub`;
+  link.download = fileName;
   link.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function exportDocument(request = {}) {
+  flushRichDocumentNow("before-export");
+  flushReferenceDocumentNow("before-export");
+  const artifact = buildExportArtifact(request);
+  if (!artifact.ok) return artifact;
+  try {
+    if (artifact.format === "pdf") {
+      const win = window.open("", "_blank");
+      if (!win) return { ok: false, reason: "Popups are blocked. Allow one popup, then choose Save as PDF.", artifact };
+      win.document.write(artifact.content); win.document.close(); win.focus(); win.print();
+      return { ok: true, message: "Print dialog opened. Choose Save as PDF.", artifact };
+    }
+    if (artifact.format === "card") {
+      downloadExportCard(artifact);
+      return { ok: true, message: `${artifact.fileName} saved.`, artifact };
+    }
+    const content = artifact.format === "epub" ? makeZip(artifact.files) : artifact.content;
+    if (!content || (typeof content === "string" && !content.length)) return { ok: false, reason: "The generated export was empty.", artifact };
+    downloadExportBlob(new Blob([content], { type: artifact.mime }), artifact.fileName);
+    return { ok: true, message: `${artifact.fileName} saved.`, artifact };
+  } catch (error) {
+    return { ok: false, reason: error?.message || "Export failed. The source document was not changed.", artifact };
+  }
 }
 
 function makeZip(files) {
@@ -3470,7 +4284,7 @@ function makeZip(files) {
     const data = encoder.encode(file.content);
     const crc = crc32(data);
     const local = zipHeader(0x04034b50, [
-      20, 0, 0, 0, 0, 0, crc, data.length, data.length, name.length, 0,
+      20, 0, 0, 0, 0, crc, data.length, data.length, name.length, 0,
     ]);
     chunks.push(local, name, data);
     central.push({
@@ -3479,7 +4293,7 @@ function makeZip(files) {
       data,
       crc,
       header: zipHeader(0x02014b50, [
-        20, 20, 0, 0, 0, 0, 0, crc, data.length, data.length, name.length, 0, 0, 0, 0, 0, offset,
+        20, 20, 0, 0, 0, 0, crc, data.length, data.length, name.length, 0, 0, 0, 0, 0, offset,
       ]),
     });
     offset += local.length + name.length + data.length;
@@ -3532,12 +4346,14 @@ function concatBytes(parts) {
 function recoverSession() {
   flushRichDocumentNow("before-session-recover");
   try {
-    const snapshot = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    const snapshot = readSessionRecoverySnapshot();
     if (!snapshot || typeof snapshot !== "object") return;
     if (snapshot.id && !snapshot.content && !snapshot.contentHtml) {
-      activeId = snapshot.id;
+      activeId = documents.some((doc) => doc.id === snapshot.id && !doc.deletedAt) ? snapshot.id : null;
+      resolveStartupActiveDocument(snapshot);
       persistNow();
       renderActive();
+      restoreSessionViewport(snapshot);
       return;
     }
     const recovered = refreshDocDerived({
@@ -3668,7 +4484,6 @@ function insertTextAtCursor(text) {
 function toggleLogMode() {
   logMode = !logMode;
   document.body.classList.toggle("log-mode", logMode);
-  els.logModeBtn.textContent = logMode ? "일반" : "로그";
   applyWordWrapPreference();
   renderSystemPanel();
 }
@@ -3683,48 +4498,182 @@ function createAndFocusDocument() {
   focusWithoutScroll(els.editor);
 }
 
+function loadUniversalCommandState() {
+  try {
+    const value = JSON.parse(localStorage.getItem(UNIVERSAL_COMMAND_KEY) || "{}");
+    return {
+      version: 1,
+      recentDocuments: safeArray(value.recentDocuments).filter((id) => typeof id === "string").slice(0, 12),
+      recentCommands: safeArray(value.recentCommands).filter((id) => typeof id === "string").slice(0, 12),
+    };
+  } catch {
+    return { version: 1, recentDocuments: [], recentCommands: [] };
+  }
+}
+
+function recordUniversalRecent(kind, id) {
+  if (!id) return;
+  const state = loadUniversalCommandState();
+  const key = kind === "document" ? "recentDocuments" : "recentCommands";
+  state[key] = [id, ...state[key].filter((item) => item !== id)].slice(0, 12);
+  safeLocalSet(UNIVERSAL_COMMAND_KEY, JSON.stringify(state));
+}
+
+function commandCategory(item) {
+  if (item.category) return item.category;
+  if (/theme|focus|ui-mode|log-mode/.test(item.id)) return "settings";
+  if (/view-|split-|inspector/.test(item.id)) return "view";
+  if (/copy-|export-|snapshot|history|recover/.test(item.id)) return "document-command";
+  return "command";
+}
+
+function universalCommandItems(query = "") {
+  const recent = loadUniversalCommandState();
+  const recentDocRank = new Map(recent.recentDocuments.map((id, index) => [id, 30 - index]));
+  const recentCommandRank = new Map(recent.recentCommands.map((id, index) => [id, 24 - index]));
+  const commandItems = COMMANDS.map((item) => ({
+    ...item,
+    type: "command",
+    category: commandCategory(item),
+    aliases: `${safeArray(item.aliases).join(" ")} ${item.hint || ""}`,
+    searchText: `${item.title} ${item.hint || ""} ${safeArray(item.aliases).join(" ")}`,
+    recentScore: recentCommandRank.get(item.id) || 0,
+    disabled: item.labOnly && uiMode !== "lab" || (typeof item.enabled === "function" && !item.enabled()),
+  }));
+  const documentItems = documents.filter((doc) => !doc.deletedAt).map((doc) => ({
+    id: `doc-${doc.id}`,
+    targetId: doc.id,
+    type: "document",
+    category: doc.favorite ? "favorite" : "document",
+    title: doc.title || "제목 없음",
+    hint: `${doc.favorite ? "즐겨찾기 · " : ""}${doc.tags.map((tag) => `#${tag}`).join(" ") || "태그 없음"}`,
+    aliases: doc.tags.join(" "),
+    searchText: doc.searchText || doc._searchText || `${doc.title} ${doc.tags.join(" ")} ${doc.previewText || ""}`,
+    recentScore: recentDocRank.get(doc.id) || Math.max(0, 6 - Math.floor((Date.now() - new Date(doc.updatedAt || 0).getTime()) / 86400000)),
+    run: () => openDocumentInPane(doc.id, "main", { source: "universal-command" }),
+  }));
+  const folderItems = folders.map((folder) => ({
+    id: `folder-${folder.id}`,
+    targetId: folder.id,
+    type: "folder",
+    category: "folder",
+    title: folder.name,
+    hint: `폴더 · ${documents.filter((doc) => !doc.deletedAt && doc.folderId === folder.id).length}개 문서`,
+    aliases: "폴더 library",
+    searchText: `${folder.name} 폴더`,
+    recentScore: 0,
+    run: () => openPortalLibrary({ folderId: folder.id }),
+  }));
+  const items = [...documentItems, ...folderItems, ...commandItems].filter((item) => !item.disabled);
+  const core = window.TextForgeUniversalCommandCore;
+  const group = (results) => {
+    const order = ["favorite", "document", "folder", "view", "settings", "document-command", "command"];
+    return results.map((item, index) => ({ item, index })).sort((a, b) => order.indexOf(a.item.category) - order.indexOf(b.item.category) || a.index - b.index).map((entry) => entry.item);
+  };
+  if (query) return group(core?.search ? core.search(items, query, 48) : items.filter((item) => `${item.title} ${item.searchText}`.toLowerCase().includes(query.toLowerCase())).slice(0, 48));
+  const recentItems = items.filter((item) => item.recentScore > 0).sort((a, b) => b.recentScore - a.recentScore);
+  return group([...recentItems, ...items.filter((item) => !recentItems.includes(item))].slice(0, 32));
+}
+
+const UNIVERSAL_CATEGORY_LABELS = {
+  favorite: "즐겨찾기 문서", document: "문서", folder: "폴더", view: "보기", settings: "설정", "document-command": "문서 작업", command: "명령",
+};
+
+async function executeUniversalCommand(item) {
+  if (!item || item.disabled) return;
+  if (item.type === "document") recordUniversalRecent("document", item.targetId);
+  else recordUniversalRecent("command", item.id);
+  closeCommandPalette({ restoreFocus: false });
+  await item.run();
+  if (item.type === "document" && currentEditorMode() !== "clean") requestAnimationFrame(() => focusWithoutScroll(currentEditorMode() === "source" ? els.editor : els.richEditor));
+}
+
 function openCommandPalette() {
+  universalCommandReturnFocus = document.activeElement;
+  if (els.richEditor.contains(document.activeElement)) saveEditorSelection();
   els.commandOverlay.classList.remove("hidden");
+  els.commandBtn?.setAttribute("aria-expanded", "true");
   els.commandInput.value = "";
+  universalCommandIndex = 0;
   renderCommands();
   focusWithoutScroll(els.commandInput);
 }
 
-function closeCommandPalette() {
+function closeCommandPalette(options = {}) {
   els.commandOverlay.classList.add("hidden");
+  els.commandBtn?.setAttribute("aria-expanded", "false");
+  els.commandInput.removeAttribute("aria-activedescendant");
+  if (options.restoreFocus !== false && universalCommandReturnFocus?.isConnected) focusWithoutScroll(universalCommandReturnFocus);
 }
 
 function renderCommands() {
-  const query = els.commandInput.value.trim().toLowerCase();
-  const docCommands = documents.map((doc) => ({
-    id: `doc-${doc.id}`,
-    title: doc.title,
-    hint: `문서 열기 · ${doc.tags.map((tag) => `#${tag}`).join(" ") || "태그 없음"}`,
-    run: () => openDocumentInPane(doc.id, "main", { source: "command-palette" }),
-  }));
-
-  const items = [...COMMANDS, ...docCommands].filter((item) => {
-    if (item.labOnly && uiMode !== "lab") return false;
-    return `${item.title} ${item.hint}`.toLowerCase().includes(query);
-  });
-
+  const query = els.commandInput.value.trim();
+  universalCommandResults = universalCommandItems(query);
+  universalCommandIndex = Math.min(Math.max(0, universalCommandIndex), Math.max(0, universalCommandResults.length - 1));
   els.commandList.innerHTML = "";
-  items.slice(0, 18).forEach((item) => {
+  if (!universalCommandResults.length) {
+    els.commandList.innerHTML = '<p class="command-empty">일치하는 문서, 폴더 또는 명령이 없습니다.</p>';
+    els.commandInput.removeAttribute("aria-activedescendant");
+    return;
+  }
+  let lastCategory = null;
+  universalCommandResults.forEach((item, index) => {
+    if (item.category !== lastCategory) {
+      const label = document.createElement("div");
+      label.className = "command-group-label";
+      label.textContent = UNIVERSAL_CATEGORY_LABELS[item.category] || "명령";
+      label.setAttribute("role", "presentation");
+      els.commandList.append(label);
+      lastCategory = item.category;
+    }
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "command-item";
-    button.innerHTML = `<strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.hint)}</span>`;
-    button.addEventListener("click", async () => {
-      closeCommandPalette();
-      await item.run();
-    });
+    button.id = `universal-command-${index}`;
+    button.className = `command-item${index === universalCommandIndex ? " selected" : ""}`;
+    button.dataset.itemType = item.type || "command";
+    if (item.targetId) button.dataset.targetId = item.targetId;
+    button.setAttribute("role", "option");
+    button.setAttribute("aria-selected", String(index === universalCommandIndex));
+    button.innerHTML = `<span class="command-item-main"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(UNIVERSAL_CATEGORY_LABELS[item.category] || "명령")}</small></span><span>${escapeHtml(item.hint || "")}</span>`;
+    button.addEventListener("pointermove", () => { universalCommandIndex = index; updateUniversalCommandSelection(); });
+    button.addEventListener("click", () => executeUniversalCommand(item));
     els.commandList.append(button);
   });
+  updateUniversalCommandSelection(false);
 }
 
-function exportCard() {
-  const doc = activeDoc();
-  if (!doc) return;
+function updateUniversalCommandSelection(scroll = true) {
+  const buttons = [...els.commandList.querySelectorAll(".command-item")];
+  buttons.forEach((button, index) => {
+    const selected = index === universalCommandIndex;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-selected", String(selected));
+  });
+  const active = buttons[universalCommandIndex];
+  if (active) {
+    els.commandInput.setAttribute("aria-activedescendant", active.id);
+    if (scroll) active.scrollIntoView({ block: "nearest" });
+  }
+}
+
+function moveUniversalCommandSelection(direction) {
+  if (!universalCommandResults.length) return;
+  universalCommandIndex = (universalCommandIndex + direction + universalCommandResults.length) % universalCommandResults.length;
+  updateUniversalCommandSelection();
+}
+
+function moveUniversalCommandGroup(direction) {
+  if (!universalCommandResults.length) return;
+  const currentCategory = universalCommandResults[universalCommandIndex]?.category;
+  for (let offset = 1; offset <= universalCommandResults.length; offset += 1) {
+    const index = (universalCommandIndex + direction * offset + universalCommandResults.length) % universalCommandResults.length;
+    if (universalCommandResults[index].category !== currentCategory) { universalCommandIndex = index; updateUniversalCommandSelection(); return; }
+  }
+}
+
+function downloadExportCard(artifact) {
+  const doc = documents.find((item) => item.id === artifact.documentId && !item.deletedAt);
+  if (!doc) throw new Error("The card source is unavailable.");
   const canvas = document.createElement("canvas");
   canvas.width = CARD_WIDTH;
   canvas.height = CARD_HEIGHT;
@@ -3734,26 +4683,25 @@ function exportCard() {
   ctx.fillStyle = "#ffffff";
   roundRect(ctx, 58, 50, CARD_WIDTH - 116, CARD_HEIGHT - 100, 22);
   ctx.fill();
-
   ctx.fillStyle = "#167c80";
   ctx.font = "700 28px Segoe UI, sans-serif";
   ctx.fillText("TextForge", 92, 104);
-
-  ctx.fillStyle = "#17212b";
-  ctx.font = "800 48px Segoe UI, sans-serif";
-  wrapCanvasText(ctx, doc.title, 92, 176, CARD_WIDTH - 184, 58, 2);
-
+  if (artifact.options.includeTitle) {
+    ctx.fillStyle = "#17212b";
+    ctx.font = "800 48px Segoe UI, sans-serif";
+    wrapCanvasText(ctx, doc.title, 92, 176, CARD_WIDTH - 184, 58, 2);
+  }
   ctx.fillStyle = "#485867";
   ctx.font = "30px Segoe UI, sans-serif";
-  wrapCanvasText(ctx, htmlToPlain(doc.contentHtml), 92, 300, CARD_WIDTH - 184, 44, 6);
-
-  ctx.fillStyle = "#607080";
-  ctx.font = "22px Segoe UI, sans-serif";
-  ctx.fillText(`${doc.content.length.toLocaleString("ko-KR")}자 · ${formatDateTime(new Date())}`, 92, CARD_HEIGHT - 88);
-
+  wrapCanvasText(ctx, htmlToPlain(doc.contentHtml), 92, artifact.options.includeTitle ? 300 : 190, CARD_WIDTH - 184, 44, artifact.options.includeTitle ? 6 : 8);
+  if (artifact.options.includeMetadata) {
+    ctx.fillStyle = "#607080";
+    ctx.font = "22px Segoe UI, sans-serif";
+    ctx.fillText(`${Number(doc.charCount || 0).toLocaleString("ko-KR")} chars`, 92, CARD_HEIGHT - 88);
+  }
   const link = document.createElement("a");
   link.href = canvas.toDataURL("image/png");
-  link.download = `${sanitizeFileName(doc.title)}.png`;
+  link.download = artifact.fileName;
   link.click();
 }
 
@@ -3791,7 +4739,7 @@ function applyWordWrapPreference() {
   document.documentElement.classList.toggle("wrap-on", wordWrapEnabled);
   els.editor.classList.toggle("no-wrap", !wordWrapEnabled);
   els.richEditor.classList.toggle("no-wrap", !wordWrapEnabled);
-  if (els.wrapToggleBtn) els.wrapToggleBtn.textContent = wordWrapEnabled ? "줄바꿈 끄기" : "줄바꿈 켜기";
+  if (els.breakLineBtn) els.breakLineBtn.textContent = wordWrapEnabled ? "화면 줄바꿈 끄기" : "화면 줄바꿈 켜기";
 }
 
 function toggleWordWrapDisplayOnly() {
@@ -3799,10 +4747,6 @@ function toggleWordWrapDisplayOnly() {
   localStorage.setItem(WORD_WRAP_KEY, wordWrapEnabled ? "true" : "false");
   applyWordWrapPreference();
   setSessionText(wordWrapEnabled ? "Word wrap on" : "Word wrap off");
-}
-
-function insertHardBreaks() {
-  toggleWordWrapDisplayOnly();
 }
 
 function applyFormat(command, value = null) {
@@ -3842,6 +4786,141 @@ function applyBlockStyle(tag) {
   saveEditorSelection();
   syncRichToDocument();
   pushBulkOperationUndoState(`block-${tag}`, bulkBefore);
+}
+
+function selectionElementFromRange(range = getEditorRangeFromSelection()) {
+  if (!range) return null;
+  const node = range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement;
+  if (!node) return null;
+  if (!range.collapsed && range.startContainer === range.endContainer && range.endOffset === range.startOffset + 1) {
+    const selected = range.startContainer.childNodes?.[range.startOffset];
+    if (selected?.nodeType === Node.ELEMENT_NODE) return selected;
+  }
+  return node;
+}
+
+function closestEditorElement(element, selector) {
+  const match = element?.closest?.(selector) || null;
+  return match && els.richEditor.contains(match) ? match : null;
+}
+
+function contextualCommandState(command) {
+  try {
+    if (document.queryCommandIndeterm?.(command)) return "mixed";
+    return Boolean(document.queryCommandState(command));
+  } catch {
+    return false;
+  }
+}
+
+function getContextualInspectorState() {
+  const range = getEditorRangeFromSelection() || savedEditorSelection;
+  if (!range || !els.richEditor.contains(range.commonAncestorContainer)) return { kind: "none", editable: false };
+  const element = selectionElementFromRange(range);
+  const image = element?.matches?.("img") ? element : closestEditorElement(element, "img");
+  const cell = closestEditorElement(element, "td, th");
+  const table = cell?.closest("table") || closestEditorElement(element, "table");
+  const link = closestEditorElement(element, "a[href]");
+  const block = closestEditorElement(element, "p, h1, h2, h3, blockquote, li, pre, div") || els.richEditor;
+  const style = getComputedStyle(element || block);
+  const base = {
+    editable: true,
+    collapsed: range.collapsed,
+    block: block === els.richEditor ? "p" : block.tagName.toLowerCase(),
+    fontFamily: style.fontFamily || "",
+    fontSize: style.fontSize || "",
+    textAlign: getComputedStyle(block).textAlign || "left",
+    bold: contextualCommandState("bold"),
+    italic: contextualCommandState("italic"),
+    underline: contextualCommandState("underline"),
+    strikeThrough: contextualCommandState("strikeThrough"),
+    foreColor: style.color || "",
+    backColor: style.backgroundColor || "",
+  };
+  if (image) return { ...base, kind: "image", width: image.style.width || image.getAttribute("width") || "auto", alt: image.getAttribute("alt") || "", align: image.closest("p, div, figure")?.style.textAlign || "left" };
+  if (table) return { ...base, kind: "table", rowIndex: cell?.parentElement?.rowIndex ?? 0, columnIndex: cell?.cellIndex ?? 0 };
+  if (link) return { ...base, kind: "link", href: link.getAttribute("href") || "", text: link.textContent || "" };
+  return { ...base, kind: range.collapsed ? "caret" : "text" };
+}
+
+function selectElementContents(element, collapse = false) {
+  if (!element) return;
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  range.collapse(collapse);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  savedEditorSelection = range.cloneRange();
+}
+
+function finalizeContextualStructure(target, reason) {
+  if (target?.isConnected) selectElementContents(target, true);
+  syncRichToDocument();
+  focusWithoutScroll(els.richEditor);
+  saveEditorSelection();
+  setSessionText(`Inspector: ${reason}`);
+}
+
+function runContextualInspectorCommand(action, value = "") {
+  if (compositionActive) return false;
+  restoreEditorSelection();
+  const state = getContextualInspectorState();
+  const range = getEditorRangeFromSelection();
+  const element = selectionElementFromRange(range);
+  if (!range || !state.editable) return false;
+  if (["bold", "italic", "underline", "strikeThrough", "justifyLeft", "justifyCenter", "justifyRight", "unlink"].includes(action)) {
+    applyFormat(action);
+    return true;
+  }
+  if (action === "block") { applyBlockStyle(value || "p"); return true; }
+  if (action === "fontFamily") { applyInlineStyle("fontFamily", value); return true; }
+  if (action === "fontSize") { applyFontSize(value); return true; }
+  if (action === "color") { applyInlineStyle("color", value); return true; }
+  if (action === "backgroundColor") { applyInlineStyle("backgroundColor", value); return true; }
+  if (action === "clear") { clearFormattingToDefault(); return true; }
+  const link = closestEditorElement(element, "a[href]");
+  if (action === "link-set") {
+    if (!value) return false;
+    if (link) { link.setAttribute("href", value); syncRichToDocument(); focusWithoutScroll(els.richEditor); return true; }
+    applyFormat("createLink", value); return true;
+  }
+  if (action === "link-remove" && link) {
+    selectElementContents(link);
+    applyFormat("unlink");
+    return true;
+  }
+  if (action === "link-open" && link) {
+    window.open(link.href, "_blank", "noopener");
+    return true;
+  }
+  const image = element?.matches?.("img") ? element : closestEditorElement(element, "img");
+  if (image && action.startsWith("image-")) {
+    createSafetySnapshot(`before-${action}`);
+    if (action === "image-width") image.style.width = value === "auto" ? "" : value;
+    if (action === "image-alt") image.setAttribute("alt", value);
+    if (action === "image-align") (image.closest("p, div, figure") || image.parentElement).style.textAlign = value;
+    if (action === "image-remove") { const parent = image.parentElement; image.remove(); finalizeContextualStructure(parent, action); return true; }
+    finalizeContextualStructure(image, action); return true;
+  }
+  const cell = closestEditorElement(element, "td, th");
+  const table = cell?.closest("table") || closestEditorElement(element, "table");
+  if (table && action.startsWith("table-")) {
+    createSafetySnapshot(`before-${action}`);
+    const row = cell?.parentElement || table.rows[0];
+    const columnIndex = cell?.cellIndex ?? 0;
+    if (action === "table-row-add") {
+      const newRow = table.insertRow(Math.min(table.rows.length, (row?.rowIndex ?? table.rows.length - 1) + 1));
+      const count = Math.max(1, row?.cells.length || table.rows[0]?.cells.length || 1);
+      for (let index = 0; index < count; index += 1) newRow.insertCell().textContent = "";
+      finalizeContextualStructure(newRow.cells[0], action); return true;
+    }
+    if (action === "table-row-delete" && row && table.rows.length > 1) { const next = table.rows[Math.max(0, row.rowIndex - 1)]?.cells[0]; row.remove(); finalizeContextualStructure(next, action); return true; }
+    if (action === "table-column-add") { [...table.rows].forEach((item) => item.insertCell(Math.min(item.cells.length, columnIndex + 1)).textContent = ""); finalizeContextualStructure(table.rows[0].cells[columnIndex + 1], action); return true; }
+    if (action === "table-column-delete" && table.rows[0]?.cells.length > 1) { [...table.rows].forEach((item) => item.cells[columnIndex]?.remove()); finalizeContextualStructure(table.rows[0].cells[Math.max(0, columnIndex - 1)], action); return true; }
+    if (action === "table-remove") { const parent = table.parentElement; table.remove(); finalizeContextualStructure(parent, action); return true; }
+  }
+  return false;
 }
 
 function getEditorRangeFromSelection() {
@@ -4361,109 +5440,51 @@ function richSampleText() {
 `;
 }
 
+function openMacintoshSurface(method) {
+  const api = window.TextForgeMacintoshExperience;
+  if (!api || typeof api[method] !== "function") {
+    setSessionText("요청한 화면을 아직 열 수 없습니다.");
+    return false;
+  }
+  api[method]();
+  return true;
+}
+
+function runActiveDocumentMenuAction(action) {
+  const current = activeDoc();
+  if (!current) return;
+  if (action === "duplicate") {
+    const now = new Date().toISOString();
+    const copy = refreshDocDerived({ ...current, id: crypto.randomUUID(), title: `${current.title} copy`, favorite: false, createdAt: now, updatedAt: now });
+    documents.unshift(copy);
+    persistNow();
+    return;
+  }
+  if (action === "trash") {
+    current.deletedAt = Date.now();
+    current.updatedAt = new Date().toISOString();
+    let next = documents.find((doc) => !doc.deletedAt);
+    if (!next) {
+      next = createDocument("");
+      documents.unshift(next);
+    }
+    activeId = next.id;
+    persistNow();
+    renderActive();
+  }
+}
+
 els.newDocBtn.addEventListener("click", createAndFocusDocument);
 
 els.searchInput.addEventListener("input", renderDocList);
-els.finderOpenBtn.addEventListener("click", openFinder);
-els.finderCloseBtn.addEventListener("click", closeFinder);
-els.finderSearchInput.addEventListener("input", scheduleFinderRender);
-els.finderSortSelect.addEventListener("change", () => {
-  finderState.sort = els.finderSortSelect.value;
-  finderState.page = 0;
-  renderFinder();
+els.portalLibraryBtn?.addEventListener("click", openPortalLibrary);
+els.sidebarFavoritesBtn?.addEventListener("click", () => openPortalLibrary({ smartFolder: "favorites" }));
+els.sidebarFoldersBtn?.addEventListener("click", () => openPortalLibrary());
+els.moreLibraryBtn?.addEventListener("click", () => openPortalLibrary());
+els.sidebarToggleBtn?.addEventListener("click", () => {
+  const collapsed = els.appShell.classList.toggle("sidebar-collapsed");
+  els.sidebarToggleBtn.setAttribute("aria-pressed", String(!collapsed));
 });
-els.finderGridBtn.addEventListener("click", () => {
-  finderState.view = "grid";
-  els.finderGridBtn.classList.add("active");
-  els.finderListBtn.classList.remove("active");
-  renderFinder();
-});
-els.finderListBtn.addEventListener("click", () => {
-  finderState.view = "list";
-  els.finderListBtn.classList.add("active");
-  els.finderGridBtn.classList.remove("active");
-  renderFinder();
-});
-els.finderSelectBtn.addEventListener("click", () => setFinderSelecting(!finderState.selecting));
-els.forgeSnapshotBtn?.addEventListener("click", openForgeSnapshotPanel);
-els.finderNewDocBtn.addEventListener("click", () => {
-  createAndFocusDocument();
-  closeFinder();
-});
-els.finderNewFolderBtn.addEventListener("click", createFolder);
-els.finderPrevBtn.addEventListener("click", () => {
-  finderState.page = Math.max(0, finderState.page - 1);
-  renderFinder();
-});
-els.finderNextBtn.addEventListener("click", () => {
-  finderState.page += 1;
-  renderFinder();
-});
-els.finderBulkMoveBtn.addEventListener("click", bulkMoveSelected);
-els.finderBulkTrashBtn.addEventListener("click", bulkTrashSelected);
-els.finderBulkCancelBtn.addEventListener("click", () => setFinderSelecting(false));
-document.querySelectorAll(".finder-nav").forEach((button) => {
-  button.addEventListener("click", () => {
-    finderState.filter = button.dataset.filter || "all";
-    finderState.tag = null;
-    finderState.folderId = null;
-    finderState.page = 0;
-    renderFinder();
-  });
-});
-els.finderTagList.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-tag]");
-  if (!button) return;
-  finderState.filter = "all";
-  finderState.tag = button.dataset.tag;
-  finderState.folderId = null;
-  finderState.page = 0;
-  renderFinder();
-});
-els.finderFolderList.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-folder-id]");
-  if (!button) return;
-  finderState.filter = "all";
-  finderState.tag = null;
-  finderState.folderId = button.dataset.folderId;
-  finderState.page = 0;
-  renderFinder();
-});
-els.finderFolderList.addEventListener("dragover", (event) => {
-  const button = event.target.closest("[data-folder-id]");
-  if (!button) return;
-  event.preventDefault();
-  button.classList.add("drag-over");
-});
-els.finderFolderList.addEventListener("dragleave", (event) => {
-  const button = event.target.closest("[data-folder-id]");
-  if (button) button.classList.remove("drag-over");
-});
-els.finderFolderList.addEventListener("drop", (event) => {
-  const button = event.target.closest("[data-folder-id]");
-  if (!button) return;
-  event.preventDefault();
-  button.classList.remove("drag-over");
-  const docId = event.dataTransfer.getData("text/plain");
-  moveDocumentToFolder(docId, button.dataset.folderId);
-});
-els.finderFolderList.addEventListener("contextmenu", (event) => {
-  const button = event.target.closest("[data-folder-id]");
-  if (!button) return;
-  event.preventDefault();
-  editFolder(button.dataset.folderId);
-});
-els.docContextMenu.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-action]");
-  if (!button) return;
-  const action = button.dataset.action;
-  hideDocContextMenu();
-  runDocContextAction(action);
-});
-document.addEventListener("click", (event) => {
-  if (!els.docContextMenu.contains(event.target)) hideDocContextMenu();
-});
-
 els.titleInput.addEventListener("input", () => {
   updateActive((doc) => {
     doc.title = els.titleInput.value || "Untitled";
@@ -4525,14 +5546,27 @@ els.richEditor.addEventListener("compositionend", (event) => {
   formatDebugLog("compositionend", { selection: getSelectionDebugSummary(), pendingTypingStyle: { ...pendingTypingStyle } });
 });
 els.richEditor.addEventListener("keyup", saveEditorSelection);
-els.richEditor.addEventListener("mouseup", saveEditorSelection);
+els.richEditor.addEventListener("mouseup", () => {
+  saveEditorSelection();
+  scheduleSessionRecoverySave();
+});
 els.richEditor.addEventListener("focus", saveEditorSelection);
+els.richEditor.addEventListener("blur", () => scheduleSessionRecoverySave(0));
+els.editor.addEventListener("blur", () => scheduleSessionRecoverySave(0));
 document.querySelector(".rich-toolbar")?.addEventListener("pointerdown", saveEditorSelection, true);
 
 document.querySelectorAll(".mode-btn").forEach((btn) => {
   btn.addEventListener("click", () => setMode(btn.dataset.mode));
+  btn.addEventListener("keydown", (event) => {
+    if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+    event.preventDefault();
+    const buttons = [...document.querySelectorAll(".mode-btn")];
+    const direction = event.key === "ArrowLeft" ? -1 : 1;
+    const next = buttons[(buttons.indexOf(btn) + direction + buttons.length) % buttons.length];
+    next?.focus();
+    if (next) setMode(next.dataset.mode);
+  });
 });
-els.viewModeSelect?.addEventListener("change", () => setMode(els.viewModeSelect.value));
 els.splitSingleBtn?.addEventListener("click", () => setSplitLayout("single"));
 els.splitVerticalBtn?.addEventListener("click", () => {
   if (!getPane("reference")?.documentId) getPane("reference").documentId = activeId;
@@ -4544,7 +5578,7 @@ els.splitHorizontalBtn?.addEventListener("click", () => {
 });
 els.splitDuplicateBtn?.addEventListener("click", () => duplicateCurrentDocumentToReferencePane("vertical-2"));
 els.splitOpenDocSelect?.addEventListener("change", () => {
-  if (els.splitOpenDocSelect.value) openDocumentInNewPane(els.splitOpenDocSelect.value, { mode: "readonly" });
+  if (els.splitOpenDocSelect.value) openDocumentInNewPane(els.splitOpenDocSelect.value, { mode: "rich" });
   els.splitOpenDocSelect.value = "";
 });
 els.splitSyncBtn?.addEventListener("click", toggleSplitScrollSync);
@@ -4556,52 +5590,93 @@ els.referencePaneBody?.addEventListener("keydown", markReferenceUserScroll);
 els.editorGrid.querySelector(".editor-pane")?.addEventListener("click", () => setActivePane("main"));
 els.referencePaneMode?.addEventListener("change", () => {
   const pane = getPane("reference");
+  flushReferenceDocumentNow("reference-mode-change");
+  captureReferenceViewState();
   pane.mode = els.referencePaneMode.value;
+  pane.readonly = pane.documentId === activeId || isDocumentDetached(pane.documentId);
   persistSplitWorkspace();
   renderSplitWorkspace({ preserveScroll: true });
 });
 els.referenceScrollLockBtn?.addEventListener("click", () => setPaneScrollLocked("reference", !getPane("reference")?.lockedScroll));
 els.referenceSyncBtn?.addEventListener("click", toggleSplitScrollSync);
-els.referenceDocSelect?.addEventListener("change", () => openDocumentInPane(els.referenceDocSelect.value, "reference", { mode: getPane("reference")?.mode || "readonly", lockedScroll: getPane("reference")?.lockedScroll }));
+els.referenceDocSelect?.addEventListener("change", () => openDocumentInPane(els.referenceDocSelect.value, "reference", { mode: getPane("reference")?.mode || "rich", lockedScroll: getPane("reference")?.lockedScroll }));
 els.referenceCloseBtn?.addEventListener("click", () => closePane("reference"));
+els.referenceSwapBtn?.addEventListener("click", swapDocumentPanes);
+els.referencePaneBody?.addEventListener("input", () => syncReferenceDocumentFast("rich"));
+els.referenceSourceEditor?.addEventListener("input", () => syncReferenceDocumentFast("source"));
+els.referencePaneBody?.addEventListener("compositionstart", () => { referenceCompositionActive = true; });
+els.referencePaneBody?.addEventListener("compositionend", () => { referenceCompositionActive = false; scheduleReferenceDocumentSync("reference-composition-end", 500); });
+[els.referencePaneBody, els.referenceSourceEditor].forEach((editor) => {
+  editor?.addEventListener("focus", () => setActivePane("reference"));
+  editor?.addEventListener("keyup", captureReferenceViewState);
+  editor?.addEventListener("mouseup", captureReferenceViewState);
+  editor?.addEventListener("blur", () => { captureReferenceViewState(); flushReferenceDocumentNow("reference-blur"); });
+});
 els.richEditor?.addEventListener("scroll", () => {
   savePaneScroll("main");
+  scheduleSessionRecoverySave();
   syncPaneScroll("main");
 });
 els.editor?.addEventListener("scroll", () => {
   savePaneScroll("main");
+  scheduleSessionRecoverySave();
   syncPaneScroll("main");
 });
 els.preview?.addEventListener("scroll", () => {
   savePaneScroll("main");
+  scheduleSessionRecoverySave();
   syncPaneScroll("main");
 });
 els.referencePaneBody?.addEventListener("scroll", () => {
   handleReferenceScroll();
   syncPaneScroll("reference");
 });
-els.workModeSelect?.addEventListener("change", () => {
-  const value = els.workModeSelect.value;
-  if (value === "plain") copyAs("plain");
-  if (value === "rich") copyAs("rich");
-  if (value === "markdown") copyAs("markdown");
-  if (value === "board") copyAs("board");
-  if (value === "tidy") cleanAiOutput();
-  if (value === "system") setInspectorOpen(true, "system");
-  if (value === "modern") setMode("rich");
-  els.workModeSelect.value = "modern";
+els.referenceSourceEditor?.addEventListener("scroll", () => { handleReferenceScroll(); syncPaneScroll("reference"); });
+els.referencePreview?.addEventListener("scroll", () => { handleReferenceScroll(); syncPaneScroll("reference"); });
+
+function setSplitDividerRatio(ratio) {
+  splitWorkspace.dividerRatio = Math.min(0.8, Math.max(0.2, Number(ratio) || 0.5));
+  persistSplitWorkspace();
+  applySplitWorkspaceUi();
+}
+
+els.splitDivider?.addEventListener("pointerdown", (event) => {
+  if (splitWorkspace.layout === "single") return;
+  event.preventDefault();
+  const grid = els.editorGrid.getBoundingClientRect();
+  const horizontal = splitWorkspace.layout === "horizontal-2";
+  const move = (moveEvent) => {
+    const ratio = horizontal ? (moveEvent.clientY - grid.top) / grid.height : (moveEvent.clientX - grid.left) / grid.width;
+    setSplitDividerRatio(ratio);
+  };
+  const stop = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop); };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", stop, { once: true });
 });
-els.inspectorToggleBtn?.addEventListener("click", () => setInspectorOpen(!inspectorOpen, inspectorTab));
-document.querySelectorAll(".inspector-tab").forEach((button) => {
-  button.addEventListener("click", () => setInspectorOpen(true, button.dataset.inspectorTab));
+els.splitDivider?.addEventListener("keydown", (event) => {
+  const relevant = splitWorkspace.layout === "horizontal-2" ? ["ArrowUp", "ArrowDown"] : ["ArrowLeft", "ArrowRight"];
+  if (!relevant.includes(event.key)) return;
+  event.preventDefault();
+  const direction = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
+  setSplitDividerRatio((splitWorkspace.dividerRatio || 0.5) + direction * (event.shiftKey ? 0.1 : 0.02));
 });
+els.inspectorToggleBtn?.addEventListener("click", () => setInspectorOpen(!inspectorOpen || inspectorTab !== "context", "context"));
 els.topForgeSnapshotBtn?.addEventListener("click", openForgeSnapshotPanel);
-els.footerForgeSnapshotBtn?.addEventListener("click", openForgeSnapshotPanel);
-els.diagnosticsOpenBtn?.addEventListener("click", openDiagnosticsPanel);
-els.topRecoverBtn?.addEventListener("click", recoverSession);
-els.topLogModeBtn?.addEventListener("click", toggleLogMode);
-els.footerHistoryBtn?.addEventListener("click", () => setInspectorOpen(true, "history"));
-els.footerSnapshotBtn?.addEventListener("click", saveManualSnapshot);
+els.quickNoteBtn?.addEventListener("click", () => openMacintoshSurface("openQuickNote"));
+els.exportStudioBtn?.addEventListener("click", () => openMacintoshSurface("openExportStudio"));
+els.versionsBtn?.addEventListener("click", () => openMacintoshSurface("openVersions"));
+els.workspaceBtn?.addEventListener("click", () => openMacintoshSurface("openWorkspaceManager"));
+els.detachedEditorBtn?.addEventListener("click", () => openMacintoshSurface("openDetached"));
+els.documentInfoBtn?.addEventListener("click", () => setInspectorOpen(true, "info"));
+els.sourceModeBtn?.addEventListener("click", () => setMode("source"));
+els.duplicateDocBtn?.addEventListener("click", () => runActiveDocumentMenuAction("duplicate"));
+els.trashDocBtn?.addEventListener("click", () => runActiveDocumentMenuAction("trash"));
+els.tocToolsBtn?.addEventListener("click", () => setInspectorOpen(true, "toc"));
+els.promptToolsBtn?.addEventListener("click", () => setInspectorOpen(true, "prompt"));
+els.systemToolsBtn?.addEventListener("click", () => setInspectorOpen(true, "system"));
+document.querySelectorAll(".grouped-menu button").forEach((button) => {
+  button.addEventListener("click", () => button.closest("details")?.removeAttribute("open"));
+});
 
 document.querySelectorAll(".format-btn[data-command]").forEach((btn) => {
   btn.addEventListener("click", (event) => {
@@ -4612,26 +5687,6 @@ document.querySelectorAll(".format-btn[data-command]").forEach((btn) => {
 els.styleSelect.addEventListener("change", (event) => {
   formatControlDebugStart("styleSelect", event.type, els.styleSelect.value);
   applyBlockStyle(els.styleSelect.value);
-});
-els.fontSelect.addEventListener("change", (event) => {
-  formatControlDebugStart("fontSelect", event.type, els.fontSelect.value);
-  applyInlineStyle("fontFamily", els.fontSelect.value);
-});
-els.sizeSelect.addEventListener("change", (event) => {
-  formatControlDebugStart("sizeSelect", event.type, els.sizeSelect.value);
-  applyFontSize(els.sizeSelect.value);
-});
-els.colorInput.addEventListener("input", (event) => {
-  formatControlDebugStart("colorInput", event.type, els.colorInput.value);
-  applyInlineStyle("color", els.colorInput.value);
-});
-els.bgInput.addEventListener("input", (event) => {
-  formatControlDebugStart("bgInput", event.type, els.bgInput.value);
-  applyInlineStyle("backgroundColor", els.bgInput.value);
-});
-els.clearFormatBtn?.addEventListener("click", (event) => {
-  formatControlDebugStart("clearFormatBtn", event.type, "default-18px");
-  clearFormattingToDefault();
 });
 els.themeSelect.addEventListener("change", () => {
   updateActive((doc) => {
@@ -4657,14 +5712,6 @@ els.copyRichBtn.addEventListener("click", () => copyAs("rich"));
 els.copyMarkdownBtn.addEventListener("click", () => copyAs("markdown"));
 els.copyBoardBtn.addEventListener("click", () => copyAs("board"));
 els.cleanOutputBtn.addEventListener("click", cleanAiOutput);
-els.exportTxtBtn.addEventListener("click", () => exportFile("txt"));
-els.exportMdBtn.addEventListener("click", () => exportFile("md"));
-els.exportHtmlBtn.addEventListener("click", () => exportFile("html"));
-els.exportPdfBtn.addEventListener("click", () => exportFile("pdf"));
-els.exportDocBtn.addEventListener("click", () => exportFile("doc"));
-els.exportEpubBtn.addEventListener("click", () => exportFile("epub"));
-els.exportCardBtn.addEventListener("click", exportCard);
-els.recoverBtn.addEventListener("click", recoverSession);
 els.snapshotBtn.addEventListener("click", saveManualSnapshot);
 els.foldPreviewBtn.addEventListener("click", () => {
   previewFolded = !previewFolded;
@@ -4674,10 +5721,28 @@ els.foldPreviewBtn.addEventListener("click", () => {
 els.insertPromptBtn.addEventListener("click", insertSelectedPrompt);
 els.copyPromptBtn.addEventListener("click", copySelectedPrompt);
 els.savePromptBtn.addEventListener("click", saveCurrentAsPrompt);
-els.logModeBtn.addEventListener("click", toggleLogMode);
 els.commandBtn.addEventListener("click", openCommandPalette);
 els.focusModeBtn?.addEventListener("click", toggleFocusMode);
-els.commandInput.addEventListener("input", renderCommands);
+els.commandInput.addEventListener("input", () => { universalCommandIndex = 0; renderCommands(); });
+els.commandInput.addEventListener("compositionstart", () => { universalCommandComposing = true; });
+els.commandInput.addEventListener("compositionend", () => { universalCommandComposing = false; universalCommandIndex = 0; renderCommands(); });
+els.commandInput.addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown") { event.preventDefault(); moveUniversalCommandSelection(1); }
+  else if (event.key === "ArrowUp") { event.preventDefault(); moveUniversalCommandSelection(-1); }
+  else if (event.key === "Tab") { event.preventDefault(); moveUniversalCommandGroup(event.shiftKey ? -1 : 1); }
+  else if (event.altKey && event.code === "Space" && universalCommandResults[universalCommandIndex]?.type === "document") {
+    event.preventDefault();
+    window.dispatchEvent(new CustomEvent("textforge:quick-look-request", { detail: { type: "document", id: universalCommandResults[universalCommandIndex].targetId, source: "universal-command" } }));
+  }
+  else if (event.key === "Enter" && !universalCommandComposing && !event.isComposing && event.keyCode !== 229) {
+    event.preventDefault();
+    executeUniversalCommand(universalCommandResults[universalCommandIndex]);
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    closeCommandPalette();
+  }
+});
 els.commandOverlay.addEventListener("click", (event) => {
   if (event.target === els.commandOverlay) closeCommandPalette();
 });
@@ -4685,6 +5750,12 @@ els.preview.addEventListener("click", (event) => {
   const link = event.target.closest(".doc-link");
   if (link) openDocByTitle(link.dataset.docTitle || link.textContent);
 });
+[els.systemList, els.docInfoList].filter(Boolean).forEach((container) => container.addEventListener("click", (event) => {
+  const backlink = event.target.closest("[data-backlink-doc-id]");
+  if (!backlink) return;
+  const source = documents.find((doc) => doc.id === backlink.dataset.backlinkDocId && !doc.deletedAt);
+  if (source) openDocumentInPane(source.id, "main", { source: "backlink" });
+}));
 els.systemList.addEventListener("click", (event) => {
   const item = event.target.closest("[data-system-action]");
   if (!item) return;
@@ -4703,8 +5774,7 @@ els.systemList.addEventListener("click", (event) => {
     }
   }
 });
-els.breakLineBtn.addEventListener("click", toggleWordWrapDisplayOnly);
-els.wrapToggleBtn.addEventListener("click", toggleWordWrapDisplayOnly);
+els.breakLineBtn?.addEventListener("click", toggleWordWrapDisplayOnly);
 
 document.addEventListener("keydown", (event) => {
   if (event.target === els.richEditor || els.richEditor.contains(event.target)) {
@@ -4749,6 +5819,25 @@ document.addEventListener("keydown", (event) => {
 
 window.addEventListener("beforeunload", () => {
   flushRichDocumentNow("beforeunload");
+  flushReferenceDocumentNow("beforeunload");
+  if (referenceDocumentDirty) persistNow({ flushRich: false });
+  savePaneScroll("main");
+  persistSessionRecoveryState();
+  portalLibraryChannel?.close();
+  detachedEditorChannel?.close();
+  clearInterval(detachedEditorHeartbeatTimer);
+});
+
+window.addEventListener("pagehide", () => {
+  if (compositionActive) return;
+  savePaneScroll("main");
+  persistSessionRecoveryState();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "hidden" || compositionActive) return;
+  savePaneScroll("main");
+  persistSessionRecoveryState();
 });
 
 window.TextForgeDocumentSwitchPerf = {
@@ -4758,8 +5847,643 @@ window.TextForgeDocumentSwitchPerf = {
   showLastDocumentSwitchTrace,
 };
 
+function experienceDocumentState(doc) {
+  return doc ? {
+    id: doc.id,
+    title: doc.title,
+    content: doc.content,
+    contentHtml: doc.contentHtml,
+    updatedAt: doc.updatedAt,
+  } : null;
+}
+
+function restoreExperienceDocumentState(state) {
+  const doc = documents.find((item) => item.id === state?.id);
+  if (!doc) return false;
+  doc.title = state.title;
+  doc.content = state.content;
+  doc.contentHtml = state.contentHtml;
+  doc.updatedAt = state.updatedAt;
+  refreshDocDerived(doc);
+  return true;
+}
+
+function experienceDocumentHtml(doc) {
+  if (!doc) return "<p></p>";
+  if (doc.id === activeId && richDocumentDirty) return sanitizeRichHtml(els.richEditor.innerHTML);
+  const reference = getPane("reference");
+  if (referenceDocumentDirty && reference?.documentId === doc.id && reference.mode === "rich") return sanitizeRichHtml(els.referencePaneBody.innerHTML);
+  return sanitizeRichHtml(doc.contentHtml || markdownToHtml(doc.content || ""));
+}
+
+function getExperiencePreview(request = {}) {
+  const type = request.type === "version" ? "version" : "document";
+  const doc = documents.find((item) => item.id === (request.docId || request.id));
+  if (!doc || doc.deletedAt) return { available: false, type, id: request.id || request.docId || null, docId: doc?.id || request.docId || null, title: doc?.title || "Unavailable", deleted: Boolean(doc?.deletedAt), sourceContext: request.contextLabel || request.source || "", contentHtml: "<p>This item is no longer available.</p>" };
+  const snapshot = type === "version" ? safeArray(doc.history).find((item) => item.id === (request.snapshotId || request.id)) : null;
+  if (type === "version" && !snapshot) return { available: false, type, id: request.id || null, docId: doc.id, title: "Unavailable version", sourceContext: request.contextLabel || request.source || "", contentHtml: "<p>This version is no longer available.</p>" };
+  const folder = folders.find((item) => item.id === doc.folderId);
+  const contentHtml = type === "version"
+    ? sanitizeRichHtml(snapshot.contentHtml || markdownToHtml(snapshot.content || ""))
+    : experienceDocumentHtml(doc);
+  return {
+    available: true,
+    type,
+    id: type === "version" ? snapshot.id : doc.id,
+    docId: doc.id,
+    title: type === "version" ? snapshot.title || doc.title : doc.title,
+    label: snapshot?.label || "",
+    createdAt: snapshot?.createdAt || doc.createdAt,
+    updatedAt: snapshot?.createdAt || doc.updatedAt,
+    charCount: htmlToPlain(contentHtml).length,
+    folder: folder?.name || "Inbox",
+    favorite: Boolean(doc.favorite),
+    deleted: Boolean(doc.deletedAt),
+    sourceContext: request.contextLabel || request.source || "",
+    contentHtml,
+  };
+}
+
+function experienceTopLevelBlock(node, root) {
+  let current = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+  while (current && current.parentElement !== root) current = current.parentElement;
+  return current?.parentElement === root ? current : null;
+}
+
+function classifyExperienceSelection(root, range) {
+  const blocks = [...root.children].filter((block) => {
+    try { return range.intersectsNode(block); } catch { return false; }
+  });
+  const fragment = range.cloneContents();
+  const hasTable = Boolean(fragment.querySelector?.("table,tbody,tr,td,th")) || Boolean(experienceTopLevelBlock(range.commonAncestorContainer, root)?.closest("table"));
+  const hasList = Boolean(fragment.querySelector?.("ul,ol,li")) || blocks.some((block) => /^(UL|OL)$/.test(block.tagName));
+  const hasMedia = Boolean(fragment.querySelector?.("img,video,audio"));
+  const exactBlocks = blocks.length > 0 && range.startContainer === root && range.endContainer === root;
+  let kind = blocks.length > 1 ? "partial-blocks" : "inline";
+  if (hasTable) kind = "table";
+  else if (hasList) kind = "list";
+  else if (hasMedia) kind = "media";
+  else if (exactBlocks) kind = blocks.length > 1 ? "blocks" : "block";
+  return { kind, blocks, exactBlocks };
+}
+
+function captureExperienceSelection() {
+  if (compositionActive || referenceCompositionActive) return { ok: false, reason: "IME composition is active." };
+  const selection = window.getSelection();
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  if (!range || range.collapsed) {
+    if (currentEditorMode() === "source" && els.editor.selectionEnd > els.editor.selectionStart) {
+      const text = els.editor.value.slice(els.editor.selectionStart, els.editor.selectionEnd);
+      experienceSelectionLease = {
+        token: crypto.randomUUID(), kind: "source", docId: activeId, paneId: "main", revision: activeDoc()?.updatedAt,
+        start: els.editor.selectionStart, end: els.editor.selectionEnd, text,
+      };
+      return { ok: true, ...experienceSelectionLease, html: `<p>${escapeHtml(text).replace(/\n/g, "<br>")}</p>`, blockCount: 0, canMoveBlocks: false };
+    }
+    return { ok: false, reason: "Select text or one or more paragraphs first." };
+  }
+  let root = null;
+  let doc = null;
+  let paneId = null;
+  if (els.richEditor.contains(range.commonAncestorContainer)) { root = els.richEditor; doc = activeDoc(); paneId = "main"; }
+  else if (els.referencePaneBody?.contains(range.commonAncestorContainer)) { root = els.referencePaneBody; doc = documents.find((item) => item.id === getPane("reference")?.documentId); paneId = "reference"; }
+  if (!root || !doc) return { ok: false, reason: "The selection is not inside an editable document." };
+  if (isDocumentDetached(doc.id) || root.getAttribute("contenteditable") !== "true") return { ok: false, reason: "This document is read-only or owned by a detached writer." };
+  const classification = classifyExperienceSelection(root, range);
+  const wrapper = document.createElement("div");
+  wrapper.append(range.cloneContents());
+  const token = crypto.randomUUID();
+  experienceSelectionLease = {
+    token,
+    kind: classification.kind,
+    docId: doc.id,
+    paneId,
+    revision: doc.updatedAt,
+    range: range.cloneRange(),
+    root,
+    blockIndexes: classification.blocks.map((block) => [...root.children].indexOf(block)).filter((index) => index >= 0),
+    exactBlocks: classification.exactBlocks,
+  };
+  return {
+    ok: true,
+    token,
+    kind: classification.kind,
+    docId: doc.id,
+    paneId,
+    revision: doc.updatedAt,
+    html: sanitizeRichHtml(wrapper.innerHTML),
+    text: wrapper.textContent || "",
+    blockCount: classification.blocks.length,
+    canMoveBlocks: classification.blocks.length > 0 && !["table", "list", "media"].includes(classification.kind),
+    expandsToBlocks: classification.blocks.length > 0 && !classification.exactBlocks,
+  };
+}
+
+function resolveExperienceSelection(token) {
+  const lease = experienceSelectionLease;
+  const doc = documents.find((item) => item.id === lease?.docId);
+  if (!lease || lease.token !== token || !doc || isDocumentDetached(doc.id)) return { ok: false, reason: "The selection is no longer available." };
+  if (lease.revision !== doc.updatedAt) return { ok: false, reason: "The document changed. Select the content again." };
+  if (lease.kind === "source") {
+    if (currentEditorMode() !== "source" || activeId !== lease.docId || els.editor.selectionStart !== lease.start || els.editor.selectionEnd !== lease.end) return { ok: false, reason: "The source selection changed." };
+    return { ok: true, lease, doc };
+  }
+  if (!lease.range?.startContainer?.isConnected || !lease.root?.isConnected) return { ok: false, reason: "The selection is stale." };
+  return { ok: true, lease, doc };
+}
+
+function selectExperienceNodes(root, first, last = first) {
+  if (!first?.isConnected || !last?.isConnected) return;
+  const range = document.createRange();
+  range.setStartBefore(first);
+  range.setEndAfter(last);
+  const selection = window.getSelection();
+  selection.removeAllRanges();
+  selection.addRange(range);
+  if (root === els.richEditor) savedEditorSelection = range.cloneRange();
+}
+
+function syncExperienceRoot(lease, doc, reason) {
+  if (lease.kind === "source") {
+    doc.content = els.editor.value;
+    doc.contentHtml = markdownToHtml(doc.content);
+  } else {
+    doc.contentHtml = sanitizeRichHtml(lease.root.innerHTML);
+    doc.content = htmlToMarkdown(doc.contentHtml);
+  }
+  doc.updatedAt = new Date().toISOString();
+  refreshDocDerived(doc);
+  richDocumentDirty = false;
+  if (lease.paneId === "reference") { referenceDocumentDirty = false; referenceDirtyDocumentId = null; }
+  window.dispatchEvent(new CustomEvent("textforge:document-content-change", { detail: { id: doc.id, source: reason } }));
+}
+
+function pushExperienceOperation(reason, before, after) {
+  const operation = { id: crypto.randomUUID(), reason, before, after, undone: false };
+  experienceOperationUndoStack.push(operation);
+  experienceOperationUndoStack = experienceOperationUndoStack.slice(-20);
+  return operation;
+}
+
+function runLocalSelectionOperation(action, token) {
+  const resolved = resolveExperienceSelection(token);
+  if (!resolved.ok) return resolved;
+  const { lease, doc } = resolved;
+  if (["table", "list", "media"].includes(lease.kind)) return { ok: false, reason: `${lease.kind} selections require a safer parent-level operation.` };
+  const before = [experienceDocumentState(doc)];
+  addSnapshot(doc, `Safety: selection ${action}`);
+  try {
+    if (lease.kind === "source") {
+      const selected = els.editor.value.slice(lease.start, lease.end);
+      if (action === "duplicate") els.editor.setRangeText(selected + selected, lease.start, lease.end, "end");
+      else if (action === "delete") els.editor.setRangeText("", lease.start, lease.end, "end");
+      else return { ok: false, reason: "Paragraph movement is available in Write mode." };
+    } else if (action === "move-up" || action === "move-down") {
+      const blocks = lease.blockIndexes.map((index) => lease.root.children[index]).filter(Boolean);
+      if (!blocks.length) return { ok: false, reason: "No safe paragraph boundary was found." };
+      const firstIndex = [...lease.root.children].indexOf(blocks[0]);
+      const lastIndex = [...lease.root.children].indexOf(blocks.at(-1));
+      if (action === "move-up") {
+        const previous = lease.root.children[firstIndex - 1];
+        if (!previous) return { ok: false, reason: "The selection is already at the document start." };
+        lease.root.insertBefore(previous, blocks.at(-1).nextSibling);
+      } else {
+        const next = lease.root.children[lastIndex + 1];
+        if (!next) return { ok: false, reason: "The selection is already at the document end." };
+        lease.root.insertBefore(next, blocks[0]);
+      }
+      selectExperienceNodes(lease.root, blocks[0], blocks.at(-1));
+    } else if (action === "duplicate") {
+      const fragment = lease.range.cloneContents();
+      const inserted = [...fragment.childNodes];
+      const insertion = lease.range.cloneRange();
+      insertion.collapse(false);
+      insertion.insertNode(fragment);
+      if (inserted.length) selectExperienceNodes(lease.root, inserted[0], inserted.at(-1));
+    } else if (action === "delete") {
+      lease.range.deleteContents();
+      lease.range.collapse(true);
+      const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(lease.range);
+    } else return { ok: false, reason: "Unsupported selection action." };
+    syncExperienceRoot(lease, doc, `selection-${action}`);
+    persistNow({ flushRich: false });
+    const operation = pushExperienceOperation(`selection-${action}`, before, [experienceDocumentState(doc)]);
+    experienceSelectionLease = null;
+    return { ok: true, operationId: operation.id, message: `Selection ${action} completed.` };
+  } catch (error) {
+    restoreExperienceDocumentState(before[0]);
+    renderActive();
+    return { ok: false, reason: error.message || "Selection operation failed." };
+  }
+}
+
+function appendExperienceHtml(doc, html) {
+  const template = document.createElement("template");
+  template.innerHTML = experienceDocumentHtml(doc);
+  const incoming = document.createElement("template");
+  incoming.innerHTML = sanitizeRichHtml(html);
+  template.content.append(...incoming.content.childNodes);
+  doc.contentHtml = sanitizeRichHtml(template.innerHTML);
+  doc.content = htmlToMarkdown(doc.contentHtml);
+  doc.updatedAt = new Date().toISOString();
+  refreshDocDerived(doc);
+}
+
+function quickNoteFragmentHtml(title, body) {
+  const blocks = String(body || "").replace(/\r\n?/g, "\n").split(/\n{2,}/).map((part) => part.trim()).filter(Boolean);
+  const titleHtml = String(title || "").trim() ? `<h3>${escapeHtml(String(title).trim())}</h3>` : "";
+  const bodyHtml = blocks.map((part) => `<p>${escapeHtml(part).replace(/\n/g, "<br>")}</p>`).join("") || "<p></p>";
+  return sanitizeRichHtml(`${titleHtml}${bodyHtml}`);
+}
+
+function loadQuickNoteOperationResults() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(QUICK_NOTE_OPERATION_KEY) || "[]");
+    return new Map(safeArray(stored).filter((item) => item && typeof item.requestId === "string" && item.result?.ok).slice(-40).map((item) => [item.requestId, item.result]));
+  } catch {
+    return new Map();
+  }
+}
+
+const quickNoteOperationResults = loadQuickNoteOperationResults();
+
+function rememberQuickNoteOperationResult(requestId, result) {
+  quickNoteOperationResults.set(requestId, result);
+  const records = [...quickNoteOperationResults.entries()].slice(-40).map(([id, value]) => ({ requestId: id, result: value }));
+  safeLocalSet(QUICK_NOTE_OPERATION_KEY, JSON.stringify(records));
+}
+
+function syncQuickNoteDocumentView(doc) {
+  if (!doc) return;
+  if (doc.id === activeId) {
+    const mode = currentEditorMode();
+    if (mode === "source") {
+      const start = els.editor.selectionStart;
+      const end = els.editor.selectionEnd;
+      const scrollTop = els.editor.scrollTop;
+      els.editor.value = doc.content;
+      els.editor.setSelectionRange(Math.min(start, doc.content.length), Math.min(end, doc.content.length));
+      els.editor.scrollTop = scrollTop;
+    } else {
+      setRichEditorHtmlPrepared(doc.contentHtml);
+    }
+    richDocumentDirty = false;
+    if (isPreviewPaneVisible()) renderPreview();
+  }
+  const reference = getPane("reference");
+  if (reference?.documentId !== doc.id) return;
+  if (reference.mode === "source") {
+    const start = els.referenceSourceEditor.selectionStart;
+    const end = els.referenceSourceEditor.selectionEnd;
+    const scrollTop = els.referenceSourceEditor.scrollTop;
+    els.referenceSourceEditor.value = doc.content;
+    els.referenceSourceEditor.setSelectionRange(Math.min(start, doc.content.length), Math.min(end, doc.content.length));
+    els.referenceSourceEditor.scrollTop = scrollTop;
+  } else if (reference.mode === "rich") {
+    els.referencePaneBody.innerHTML = prepareHtmlForThemedRender(doc.contentHtml);
+  } else if (!els.referencePane?.classList.contains("hidden")) {
+    renderReferencePane();
+  }
+  referenceDocumentDirty = false;
+  referenceDirtyDocumentId = null;
+}
+
+async function performQuickNoteSave(request = {}) {
+  const requestId = typeof request.operationId === "string" && request.operationId ? request.operationId : crypto.randomUUID();
+  const cached = quickNoteOperationResults.get(requestId);
+  if (cached) return { ...cached, deduplicated: true };
+  const body = String(request.body || "").trim();
+  const title = String(request.title || "").trim().slice(0, 240);
+  if (!body) return { ok: false, reason: "Write something before saving the Quick Note." };
+  if (body.length > 50000) return { ok: false, reason: "Quick Note is limited to 50,000 characters." };
+
+  flushRichDocumentNow("before-quick-note-save");
+  flushReferenceDocumentNow("before-quick-note-save");
+  const target = String(request.target || "new-inbox");
+  if (target === "new-inbox" || target === "new-document") {
+    const previousActiveId = activeId;
+    const doc = createDocument("");
+    const firstLine = body.split(/\r?\n/).find((line) => line.trim())?.trim() || "Quick Note";
+    doc.title = title || firstLine.slice(0, 80);
+    doc.contentHtml = quickNoteFragmentHtml("", body);
+    doc.content = htmlToMarkdown(doc.contentHtml);
+    doc.folderId = target === "new-inbox" ? null : (folders.some((folder) => folder.id === request.folderId) ? request.folderId : null);
+    doc.tags = safeArray(request.tags).map((tag) => String(tag).trim()).filter(Boolean).slice(0, 20);
+    refreshDocDerived(doc);
+    documents.unshift(doc);
+    try {
+      if (!await persistExperienceOperationDurably()) throw new Error("The new Quick Note could not be saved.");
+      const operation = pushExperienceOperation("quick-note-create", [], []);
+      operation.createdDocuments = [experienceDocumentState(doc)];
+      const result = { ok: true, documentId: doc.id, operationId: operation.id, message: "Quick Note saved without changing the current document." };
+      rememberQuickNoteOperationResult(requestId, result);
+      persistNow({ flushRich: false });
+      renderDocList();
+      if (request.openAfter) openDocumentInPane(doc.id, "main", { source: "quick-note" });
+      else activeId = previousActiveId;
+      return result;
+    } catch (error) {
+      documents = documents.filter((item) => item.id !== doc.id);
+      activeId = previousActiveId;
+      persistNow({ flushRich: false });
+      await persistExperienceOperationDurably();
+      return { ok: false, rolledBack: true, reason: error.message || "Quick Note creation failed." };
+    }
+  }
+
+  const targetId = target === "append-current" ? activeId : target.startsWith("append:") ? target.slice(7) : "";
+  const doc = documents.find((item) => item.id === targetId && !item.deletedAt);
+  if (!doc) return { ok: false, reason: "The Quick Note destination is unavailable." };
+  if (isDocumentDetached(doc.id)) return { ok: false, reason: "A detached writer currently owns this document." };
+  if (request.targetRevision && request.targetRevision !== doc.updatedAt) return { ok: false, reason: "The destination changed. Review it before saving again." };
+  const mainViewState = doc.id === activeId ? captureMainViewState() : null;
+  const before = experienceDocumentState(doc);
+  addSnapshot(doc, "Safety: append Quick Note");
+  try {
+    appendExperienceHtml(doc, quickNoteFragmentHtml(title, body));
+    if (!await persistExperienceOperationDurably()) throw new Error("The Quick Note destination could not be saved.");
+    syncQuickNoteDocumentView(doc);
+    if (mainViewState) restoreMainViewState(mainViewState);
+    persistNow({ flushRich: false });
+    renderDocList();
+    window.dispatchEvent(new CustomEvent("textforge:document-content-change", { detail: { id: doc.id, source: "quick-note" } }));
+    const operation = pushExperienceOperation("quick-note-append", [before], [experienceDocumentState(doc)]);
+    const result = { ok: true, documentId: doc.id, operationId: operation.id, message: `Quick Note appended to ${doc.title || "Untitled"}.` };
+    rememberQuickNoteOperationResult(requestId, result);
+    if (request.openAfter && doc.id !== activeId) openDocumentInPane(doc.id, "main", { source: "quick-note" });
+    return result;
+  } catch (error) {
+    restoreExperienceDocumentState(before);
+    syncQuickNoteDocumentView(doc);
+    if (mainViewState) restoreMainViewState(mainViewState);
+    persistNow({ flushRich: false });
+    await persistExperienceOperationDurably();
+    return { ok: false, rolledBack: true, reason: error.message || "Quick Note append failed." };
+  }
+}
+
+const quickNoteOperationsInFlight = new Map();
+
+function saveQuickNote(request = {}) {
+  const requestId = typeof request.operationId === "string" && request.operationId ? request.operationId : crypto.randomUUID();
+  const cached = quickNoteOperationResults.get(requestId);
+  if (cached) return Promise.resolve({ ...cached, deduplicated: true });
+  const pending = quickNoteOperationsInFlight.get(requestId);
+  if (pending) return pending;
+  const operation = performQuickNoteSave({ ...request, operationId: requestId });
+  quickNoteOperationsInFlight.set(requestId, operation);
+  operation.then(() => quickNoteOperationsInFlight.delete(requestId), () => quickNoteOperationsInFlight.delete(requestId));
+  return operation;
+}
+
+async function runCrossDocumentSelectionOperation(action, token, targetId, options = {}) {
+  const resolved = resolveExperienceSelection(token);
+  if (!resolved.ok) return resolved;
+  const { lease, doc: source } = resolved;
+  const target = documents.find((item) => item.id === targetId && !item.deletedAt);
+  if (!target || target.id === source.id) return { ok: false, reason: "Choose another available document." };
+  if (isDocumentDetached(source.id) || isDocumentDetached(target.id)) return { ok: false, reason: "A detached writer currently owns one of these documents." };
+  if (["table", "list"].includes(lease.kind)) return { ok: false, reason: "Partial table and list selections cannot be sent safely." };
+  const wrapper = document.createElement("div");
+  if (lease.kind === "source") wrapper.innerHTML = `<p>${escapeHtml(lease.text).replace(/\n/g, "<br>")}</p>`;
+  else wrapper.append(lease.range.cloneContents());
+  const fragmentHtml = sanitizeRichHtml(wrapper.innerHTML);
+  const before = [experienceDocumentState(source), experienceDocumentState(target)];
+  addSnapshot(source, `Safety: selection ${action}`);
+  addSnapshot(target, `Safety: receive selection ${action}`);
+  try {
+    appendExperienceHtml(target, fragmentHtml);
+    if (options.simulateFailure === "target-save") throw new Error("Simulated target save failure");
+    if (!await persistExperienceOperationDurably()) throw new Error("Target document could not be saved.");
+    if (action === "move") {
+      if (lease.kind === "source") els.editor.setRangeText("", lease.start, lease.end, "end");
+      else lease.range.deleteContents();
+      syncExperienceRoot(lease, source, "selection-move-source");
+      if (options.simulateFailure === "source-save") throw new Error("Simulated source save failure");
+      if (!await persistExperienceOperationDurably()) throw new Error("Source document could not be saved.");
+    }
+    persistNow({ flushRich: false });
+    renderDocList();
+    const after = [experienceDocumentState(source), experienceDocumentState(target)];
+    const operation = pushExperienceOperation(`selection-${action}`, before, after);
+    experienceSelectionLease = null;
+    return { ok: true, operationId: operation.id, message: `Selection ${action} completed at the target document end.` };
+  } catch (error) {
+    before.forEach(restoreExperienceDocumentState);
+    if (lease.paneId === "main" && source.id === activeId) setRichEditorHtmlPrepared(source.contentHtml);
+    if (lease.paneId === "reference" && getPane("reference")?.documentId === source.id) els.referencePaneBody.innerHTML = prepareHtmlForThemedRender(source.contentHtml);
+    persistNow({ flushRich: false });
+    await persistExperienceOperationDurably();
+    return { ok: false, rolledBack: true, reason: error.message || "The move was rolled back." };
+  }
+}
+
+async function createDocumentFromExperienceSelection(token, move = false, title = "") {
+  const resolved = resolveExperienceSelection(token);
+  if (!resolved.ok) return resolved;
+  const { lease, doc: source } = resolved;
+  if (["table", "list"].includes(lease.kind)) return { ok: false, reason: "Select a complete safe block before creating a document." };
+  const wrapper = document.createElement("div");
+  if (lease.kind === "source") wrapper.innerHTML = `<p>${escapeHtml(lease.text).replace(/\n/g, "<br>")}</p>`;
+  else wrapper.append(lease.range.cloneContents());
+  const beforeSource = experienceDocumentState(source);
+  const doc = createDocument("");
+  doc.title = String(title || `${source.title || "Note"} excerpt`).trim() || "Selection excerpt";
+  doc.folderId = source.folderId || null;
+  doc.contentHtml = sanitizeRichHtml(wrapper.innerHTML);
+  doc.content = htmlToMarkdown(doc.contentHtml);
+  refreshDocDerived(doc);
+  let newDocumentPersisted = false;
+  try {
+    documents.unshift(doc);
+    if (!await persistExperienceOperationDurably()) throw new Error("The new document could not be saved.");
+    newDocumentPersisted = durableStorageHydrated;
+    if (move) {
+      addSnapshot(source, "Safety: move selection to new document");
+      if (lease.kind === "source") els.editor.setRangeText("", lease.start, lease.end, "end");
+      else lease.range.deleteContents();
+      syncExperienceRoot(lease, source, "selection-move-new-document");
+      if (!await persistExperienceOperationDurably()) throw new Error("The source document could not be saved.");
+    }
+    persistNow({ flushRich: false });
+    const operation = pushExperienceOperation(move ? "selection-move-new" : "selection-copy-new", [beforeSource], [experienceDocumentState(source)]);
+    operation.createdDocuments = [experienceDocumentState(doc)];
+    experienceSelectionLease = null;
+    return { ok: true, documentId: doc.id, operationId: operation.id, message: move ? "Selection moved to a new document." : "Selection copied to a new document." };
+  } catch (error) {
+    if (newDocumentPersisted) {
+      doc.deletedAt = new Date().toISOString();
+      doc.updatedAt = doc.deletedAt;
+      refreshDocDerived(doc);
+    } else documents = documents.filter((item) => item.id !== doc.id);
+    restoreExperienceDocumentState(beforeSource);
+    persistNow({ flushRich: false });
+    await persistExperienceOperationDurably();
+    return { ok: false, rolledBack: true, reason: error.message || "Document creation failed." };
+  }
+}
+
+function insertExperienceDocumentLink(token, targetId) {
+  const resolved = resolveExperienceSelection(token);
+  if (!resolved.ok) return resolved;
+  const target = documents.find((item) => item.id === targetId && !item.deletedAt);
+  if (!target) return { ok: false, reason: "The linked document is unavailable." };
+  const { lease, doc } = resolved;
+  const before = [experienceDocumentState(doc)];
+  const linkText = ` [[${target.title}]]`;
+  if (lease.kind === "source") {
+    els.editor.setRangeText(`${els.editor.value.slice(lease.start, lease.end)}${linkText}`, lease.start, lease.end, "end");
+  } else {
+    const insertion = lease.range.cloneRange(); insertion.collapse(false); insertion.insertNode(document.createTextNode(linkText));
+  }
+  syncExperienceRoot(lease, doc, "selection-link");
+  persistNow({ flushRich: false });
+  const operation = pushExperienceOperation("selection-link", before, [experienceDocumentState(doc)]);
+  experienceSelectionLease = null;
+  return { ok: true, operationId: operation.id, message: `Linked to ${target.title}.` };
+}
+
+function insertSnapshotBlocks(snapshotId, blockIndexes = []) {
+  const doc = activeDoc();
+  const snapshot = safeArray(doc?.history).find((item) => item.id === snapshotId);
+  if (!doc || !snapshot || currentEditorMode() === "source" || isDocumentDetached(doc.id)) return { ok: false, reason: "Return to an editable Write view before inserting version content." };
+  const template = document.createElement("template");
+  template.innerHTML = sanitizeRichHtml(snapshot.contentHtml || markdownToHtml(snapshot.content || ""));
+  const children = [...template.content.children];
+  const selected = [...new Set(safeArray(blockIndexes).map(Number))].map((index) => children[index]).filter(Boolean);
+  if (!selected.length || selected.some((node) => node.matches("table") || node.querySelector("table"))) return { ok: false, reason: "Choose one or more safe text blocks." };
+  const before = captureActiveDocumentState("insert-version-blocks");
+  createSafetySnapshot("before-version-insert");
+  restoreEditorSelection();
+  const range = getEditorRangeFromSelection();
+  if (!range) return { ok: false, reason: "Place the caret in the current document first." };
+  const fragment = document.createDocumentFragment(); selected.forEach((node) => fragment.append(node.cloneNode(true)));
+  range.insertNode(fragment);
+  syncRichToDocumentFull({ renderPreviewNow: isPreviewPaneVisible(), updateStatsNow: true });
+  pushBulkOperationUndoState("insert-version-blocks", before);
+  return { ok: true, message: `${selected.length} version block(s) inserted.` };
+}
+
+function undoExperienceOperation(operationId = null) {
+  const operation = [...experienceOperationUndoStack].reverse().find((item) => !item.undone && (!operationId || item.id === operationId));
+  if (!operation) return { ok: false, reason: "No Selection operation is available to undo." };
+  const safe = operation.after.every((state) => {
+    const doc = documents.find((item) => item.id === state.id);
+    return doc && doc.contentHtml === state.contentHtml;
+  }) && safeArray(operation.createdDocuments).every((state) => documents.find((item) => item.id === state.id)?.contentHtml === state.contentHtml);
+  if (!safe) return { ok: false, reason: "These documents changed after the operation. Use History or a Safety Snapshot instead." };
+  operation.before.forEach(restoreExperienceDocumentState);
+  const createdIds = new Set(safeArray(operation.createdDocuments).map((state) => state.id));
+  documents.forEach((doc) => {
+    if (!createdIds.has(doc.id)) return;
+    doc.deletedAt = new Date().toISOString();
+    doc.updatedAt = doc.deletedAt;
+    refreshDocDerived(doc);
+  });
+  operation.undone = true;
+  persistNow({ flushRich: false });
+  renderActive(); renderDocList();
+  return { ok: true, message: "Selection operation undone." };
+}
+
+// A narrow UI host for optional local-only experience layers. Document persistence
+// remains owned by this file; consumers receive copies and invoke explicit actions.
+window.TextForgeExperienceHost = {
+  getDocuments: () => documents.map((doc) => ({ ...doc, tags: [...doc.tags], history: safeArray(doc.history).map((item) => ({ ...item })) })),
+  getDocumentMetadata: () => documents.map((doc) => ({
+    id: doc.id, title: doc.title, type: doc.type, folderId: doc.folderId, tags: [...doc.tags], favorite: doc.favorite,
+    deletedAt: doc.deletedAt, createdAt: doc.createdAt, updatedAt: doc.updatedAt, charCount: doc.charCount, previewText: doc.previewText,
+  })),
+  getActiveDocument: () => {
+    const doc = activeDoc();
+    return doc ? { ...doc, tags: [...doc.tags], history: safeArray(doc.history).map((item) => ({ ...item })) } : null;
+  },
+  getFolders: () => folders.map((folder) => ({ ...folder })),
+  openDocument: (id, options = {}) => openDocumentInPane(id, options.paneId || "main", { source: options.source || "mac-experience", ...options }),
+  setSplitLayout,
+  getSplitWorkspace: () => JSON.parse(JSON.stringify(splitWorkspace)),
+  restoreSplitWorkspace: restoreSplitWorkspaceState,
+  openDocumentInNewPane,
+  swapDocumentPanes,
+  closeReferencePane: () => closePane("reference"),
+  captureMainViewState,
+  restoreMainViewState,
+  captureReferenceViewState,
+  flushAllEditors: (reason = "experience-host") => {
+    flushRichDocumentNow(reason);
+    flushReferenceDocumentNow(reason);
+    persistNow({ flushRich: false });
+    return true;
+  },
+  setInspectorOpen,
+  getInspectorState: () => ({ open: inspectorOpen, tab: inspectorTab }),
+  getFocusMode: () => focusMode,
+  toggleFocusMode,
+  setFocusMode: applyFocusMode,
+  openDetachedEditor,
+  getDetachedDocuments: () => [...detachedEditorLeases.values()].map((lease) => ({ documentId: lease.documentId, windowId: lease.windowId, originalTabIndex: lease.originalTabIndex, viewState: lease.viewState || null })),
+  saveManualSnapshot,
+  getExportCapabilities,
+  getExportPreview,
+  exportDocument,
+  copyExportDocument,
+  openForgeSnapshotPanel,
+  copyAs,
+  addCommands: (items) => COMMANDS.push(...items),
+  getContextualInspectorState,
+  runContextualInspectorCommand,
+  saveEditorSelection,
+  focusEditor: () => focusWithoutScroll(currentEditorMode() === "source" ? els.editor : els.richEditor),
+  isComposing: () => compositionActive,
+  getPreview: getExperiencePreview,
+  captureSelectionObject: captureExperienceSelection,
+  runLocalSelectionOperation,
+  runCrossDocumentSelectionOperation,
+  createDocumentFromSelection: createDocumentFromExperienceSelection,
+  insertDocumentLinkFromSelection: insertExperienceDocumentLink,
+  insertSnapshotBlocks,
+  undoSelectionOperation: undoExperienceOperation,
+  saveQuickNote,
+  createQuickNote: ({ title, body, folderId = null, tags = [] }) => {
+    return saveQuickNote({ operationId: crypto.randomUUID(), title, body, folderId, tags, target: folderId ? "new-document" : "new-inbox", openAfter: false });
+  },
+  createDocumentFromSnapshot: (snapshot) => {
+    const doc = createDocument(snapshot?.content || "");
+    doc.title = `${snapshot?.title || "Version"} copy`;
+    doc.contentHtml = snapshot?.contentHtml || doc.contentHtml;
+    refreshDocDerived(doc);
+    documents.unshift(doc);
+    activeId = doc.id;
+    persistNow();
+    renderActive();
+    renderDocList();
+    return doc.id;
+  },
+  restoreSnapshot: (id) => restoreSnapshot(id),
+  getSelectionPayload: () => {
+    const range = getEditorRangeFromSelection();
+    if (!range || range.collapsed) return null;
+    const wrapper = document.createElement("div");
+    wrapper.append(range.cloneContents());
+    return { html: wrapper.innerHTML, text: wrapper.textContent || "", start: range.startOffset, end: range.endOffset };
+  },
+  replaceSelectionWithHtml: (html) => {
+    const range = getEditorRangeFromSelection();
+    if (!range) return false;
+    range.deleteContents();
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    range.insertNode(template.content);
+    flushRichDocumentNow("selection-object");
+    return true;
+  },
+};
+
 initTheme();
+initPortalLibraryBridge();
+initDetachedEditorBridge();
 initFloatingUiDismiss();
+initModalAccessibility();
 setUiMode(uiMode);
 focusMode = loadFocusModeState();
 updateFocusModeUi();
@@ -4770,6 +6494,7 @@ initPwaInstallHints();
 renderInspectorState();
 renderActive();
 renderDocList();
+scheduleStartupResume(readSessionRecoverySnapshot());
 configureDiagnosticsContext();
 (async () => {
   await hydrateFromDurableStorage();

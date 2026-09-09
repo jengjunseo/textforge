@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>TextForge - 별도 창에서 편집</title>
+  <link rel="stylesheet" href="detached-editor.css">
+  <link rel="stylesheet" href="textforge-quick-look.css">
+</head>
+<body>
+  <header class="detached-titlebar">
+    <div class="detached-title-group">
+      <span class="detached-product">TextForge</span>
+      <input id="detachedTitle" aria-label="Document title" value="Loading..." autocomplete="off">
+    </div>
+    <div class="detached-window-actions">
+      <span id="detachedConnection" class="connection-state" role="status">Connecting</span>
+      <button id="reattachBtn" type="button">Reattach</button>
+    </div>
+  </header>
+  <nav class="detached-toolbar" aria-label="별도 창 편집 도구">
+    <div class="segmented" aria-label="Document mode">
+      <button type="button" data-mode="rich" aria-pressed="true">Write</button>
+      <button type="button" data-mode="source" aria-pressed="false">Source</button>
+      <button type="button" data-mode="preview" aria-pressed="false">Preview</button>
+    </div>
+    <span class="toolbar-separator" aria-hidden="true"></span>
+    <button id="detachedQuickLookBtn" type="button" title="Quick Look" aria-label="Quick Look current document">&#9673;</button>
+    <button type="button" data-command="undo" title="Undo" aria-label="Undo">↶</button>
+    <button type="button" data-command="redo" title="Redo" aria-label="Redo">↷</button>
+    <button type="button" data-command="bold" title="Bold" aria-label="Bold"><strong>B</strong></button>
+    <button type="button" data-command="italic" title="Italic" aria-label="Italic"><em>I</em></button>
+    <button type="button" data-command="underline" title="Underline" aria-label="Underline"><u>U</u></button>
+  </nav>
+  <main class="detached-editor-shell">
+    <div id="detachedRichEditor" class="detached-rich-editor" contenteditable="false" spellcheck="true" aria-label="Document editor"></div>
+    <textarea id="detachedSourceEditor" class="detached-source-editor hidden" spellcheck="false" wrap="soft" aria-label="Document source editor"></textarea>
+    <article id="detachedPreview" class="detached-preview hidden" aria-label="Document preview"></article>
+  </main>
+  <footer class="detached-statusbar">
+    <span id="detachedSaveState">Waiting for main window</span>
+    <span>Single-writer local window</span>
+  </footer>
+  <script src="textforge-quick-look.js"></script>
+  <script src="detached-editor.js"></script>
+</body>
+</html>

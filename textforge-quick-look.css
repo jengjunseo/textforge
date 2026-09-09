@@ -1,0 +1,19 @@
+.tf-quicklook-overlay { position:fixed; inset:0; z-index:120; display:grid; place-items:center; padding:20px; background:rgb(15 20 28 / .42); }
+.tf-quicklook-modal { width:min(980px,100%); max-height:min(760px,calc(100vh - 40px)); overflow:auto; padding:18px; border:1px solid var(--border-default,#c6ccd3); border-radius:8px; background:var(--bg-surface,#fff); color:var(--text-primary,#17212b); box-shadow:0 20px 60px rgb(0 0 0 / .25); }
+.tf-quicklook-modal .tf-modal-head,.tf-quicklook-modal .tf-modal-actions { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.tf-quicklook-modal .tf-modal-head h2 { margin:0; font-size:20px; }
+.tf-quicklook-modal .tf-modal-actions { justify-content:flex-end; margin-top:16px; }
+.tf-quicklook-modal button,.tf-quicklook-modal input { min-height:32px; border:1px solid var(--border-default,#c6ccd3); border-radius:6px; background:var(--bg-elevated,#fff); color:inherit; }
+.tf-quicklook { display:grid; min-height:min(560px,65vh); grid-template-rows:auto auto minmax(0,1fr); gap:10px; margin-top:12px; }
+.tf-quicklook-toolbar,.tf-quicklook-meta { display:flex; align-items:center; gap:8px; min-width:0; }
+.tf-quicklook-toolbar button { width:32px; min-width:32px; height:32px; padding:0; }
+.tf-quicklook-search { display:flex; min-width:160px; flex:1; align-items:center; gap:7px; }
+.tf-quicklook-search input { min-width:80px; flex:1; padding:4px 8px; }
+.tf-quicklook-search span { min-width:54px; color:var(--text-secondary,#66717c); font-size:12px; }
+.tf-quicklook-meta { flex-wrap:wrap; color:var(--text-secondary,#66717c); font-size:12px; }
+.tf-quicklook-meta strong { color:var(--text-primary,#17212b); font-size:16px; }
+.tf-quicklook-preview { min-height:0; overflow:auto; border-top:1px solid var(--border-default,#c6ccd3); padding:14px 8px 8px; }
+.tf-quicklook-preview mark.current { outline:2px solid #167c80; outline-offset:2px; }
+.tf-readonly-badge { margin-right:auto; color:var(--text-secondary,#66717c); font-size:12px; }
+@media (max-width:700px) { .tf-quicklook-toolbar { flex-wrap:wrap; } }
+@media (prefers-reduced-motion:reduce) { .tf-quicklook-overlay { scroll-behavior:auto; transition:none!important; } }

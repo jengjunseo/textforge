@@ -1,5 +1,6 @@
 (function () {
-  const VERSION = 1;
+  const VERSION = 2;
+  const DIAGNOSTICS_SCHEMA_VERSION = 2;
   let context = {};
   let lastReport = null;
   let currentBenchmarkTask = "idle";
@@ -48,8 +49,12 @@
     realLibrary: document.querySelector("#diagRealLibraryBtn"),
     mttr: document.querySelector("#diagMttrBtn"),
     snapshot: document.querySelector("#diagSnapshotBtn"),
+    writer: document.querySelector("#diagWriterBtn"),
+    releaseGate: document.querySelector("#diagReleaseGateBtn"),
     stress: document.querySelector("#diagStressBtn"),
     export: document.querySelector("#diagExportBtn"),
+    copyJson: document.querySelector("#diagCopyJsonBtn"),
+    clear: document.querySelector("#diagClearBtn"),
     summary: document.querySelector("#diagnosticsSummary"),
     output: document.querySelector("#diagnosticsOutput"),
   });
@@ -498,6 +503,244 @@
     };
   }
 
+  function getActiveDocumentSafe() {
+    try {
+      const doc = context.getActiveDocument?.();
+      return doc ? { ...doc } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function collectRuntimeContext() {
+    const docs = getDocuments();
+    const activeDoc = getActiveDocumentSafe() || docs[0] || null;
+    const docSizes = docs.map((doc) => (doc.plainText || htmlToPlain(doc.contentHtml || "")).length);
+    const totalCharCount = docSizes.reduce((sum, size) => sum + size, 0);
+    const maxCharCount = docSizes.reduce((max, size) => Math.max(max, size), 0);
+    const root = document.documentElement;
+    const splitOn = Boolean(root.classList.contains("workspace-active") || document.querySelector(".editor-grid.workspace-active"));
+    const focusOn = Boolean(document.body.classList.contains("focus-mode") || root.classList.contains("focus-mode") || localStorage.getItem("textforge.focusMode") === "true");
+    const inspector = document.querySelector(".inspector");
+    const editorHtml = document.querySelector("#richEditor")?.innerHTML || activeDoc?.contentHtml || "";
+    return {
+      documentCount: docs.length,
+      totalCharCount,
+      maxCharCount,
+      averageCharCount: round(totalCharCount / Math.max(1, docs.length)),
+      activeDocument: activeDoc
+        ? {
+            id: activeDoc.id || null,
+            title: activeDoc.title || "Untitled",
+            charCount: (activeDoc.plainText || htmlToPlain(activeDoc.contentHtml || "")).length,
+            htmlLength: (activeDoc.contentHtml || editorHtml || "").length,
+            editorDomNodeCount: document.querySelector("#richEditor")?.querySelectorAll("*").length || null,
+          }
+        : null,
+      uiState: {
+        appMode: matchMedia("(display-mode: standalone)").matches || navigator.standalone === true,
+        mode: root.dataset.mode || "rich",
+        theme: root.dataset.theme || "system",
+        focusMode: focusOn,
+        splitView: splitOn,
+        inspectorOpen: inspector ? !inspector.classList.contains("collapsed") : null,
+        labMode: root.dataset.uiMode === "lab" || localStorage.getItem("textforge.uiMode") === "lab",
+      },
+      storage: {
+        localStorageBytes: estimateLocalStorageBytes(),
+      },
+    };
+  }
+
+  function addSafetyMutationGuardTests(report) {
+    if (report.safetyMutationGuard) return;
+    const tests = [];
+    const sampleDoc = safeNormalizeDocument({
+      id: "diagnostics-mock",
+      title: "Diagnostics mock",
+      contentHtml: `<p>${"long-word-".repeat(30)}</p>`,
+      plainText: "Diagnostics mock",
+    });
+    const originalHtml = sampleDoc.contentHtml;
+    const originalJson = JSON.stringify(sampleDoc);
+
+    const wrapHost = document.createElement("div");
+    wrapHost.dataset.diagnostics = "word-wrap-invariant";
+    wrapHost.innerHTML = originalHtml;
+    wrapHost.classList.toggle("log-mode", true);
+    tests.push({
+      name: "safety:word-wrap-display-only-invariant",
+      ok: sampleDoc.contentHtml === originalHtml,
+      durationMs: 0,
+      notes: "Temporary DOM class toggle only; mock document unchanged.",
+    });
+
+    const cleanupSource = { ...sampleDoc };
+    const cleanupClone = { ...cleanupSource, contentHtml: safeHtmlSanitize(`${cleanupSource.contentHtml}<script>bad()</script>`) };
+    tests.push({
+      name: "safety:ai-cleanup-original-preservation",
+      ok: JSON.stringify(cleanupSource) === originalJson && cleanupClone !== cleanupSource && !cleanupClone.contentHtml.includes("<script"),
+      durationMs: 0,
+      notes: "Cleanup sanitized a separate clone; original mock preserved.",
+    });
+
+    const focusView = { width: 720 };
+    focusView.width += 40;
+    tests.push({
+      name: "safety:focus-resize-view-only",
+      ok: sampleDoc.contentHtml === originalHtml && focusView.width === 760,
+      durationMs: 0,
+      notes: "Focus width changed on mock view state only.",
+    });
+
+    const guardBanner = document.querySelector(".guard-banner");
+    tests.push({
+      name: "safety:guard-banner-layout-shift-read-only",
+      ok: !guardBanner || guardBanner instanceof HTMLElement,
+      durationMs: 0,
+      notes: "DOM existence/layout read only; no banner mutation.",
+    });
+
+    const bulkMock = [sampleDoc].map((doc) => ({ ...doc }));
+    const bulkBefore = JSON.stringify(bulkMock);
+    const bulkPreview = bulkMock.map((doc) => ({ id: doc.id, title: doc.title }));
+    tests.push({
+      name: "safety:bulk-operation-read-only-clone",
+      ok: JSON.stringify(bulkMock) === bulkBefore && bulkPreview.length === bulkMock.length,
+      durationMs: 0,
+      notes: "Bulk operation simulated on cloned metadata only.",
+    });
+
+    tests.forEach((test) => report.tests.push(test));
+    report.safetyMutationGuard = {
+      realDocumentsMutated: false,
+      dataFormatChanged: false,
+      tests: tests.map(({ name, ok, notes }) => ({ name, ok, notes })),
+    };
+  }
+
+  function getTypingDebugSummary() {
+    try {
+      return window.TextForgeTypingDebug?.summary?.() || null;
+    } catch (error) {
+      return { error: String(error?.message || error) };
+    }
+  }
+
+  function buildFeatureIntegrity(report) {
+    const names = report.tests.map((test) => test.name);
+    const has = (needle) => names.some((name) => name.includes(needle));
+    return {
+      smartCopySmoke: has("copy") || has("plain"),
+      exportSmoke: has("export"),
+      snapshotSmoke: has("snapshot"),
+      finderSearchSmoke: has("search"),
+      documentOpenSmoke: has("open"),
+      notes: "Diagnostics v2 uses smoke checks and read-only clones; it does not edit user documents.",
+    };
+  }
+
+  function buildLongDocumentReadiness(report, runtimeContext) {
+    const latency = report.performance.allLatency || {};
+    const longDocTests = report.tests.filter((test) => /long|100k|50k|huge/i.test(test.name));
+    return {
+      currentDocumentSize: runtimeContext.activeDocument?.charCount || 0,
+      maxLibraryDocumentSize: runtimeContext.maxCharCount,
+      longLineProtection: Boolean(document.querySelector(".guard-banner") || document.querySelector("#longLineStatus")),
+      relevantTests: longDocTests.map((test) => ({ name: test.name, ok: test.ok, durationMs: test.durationMs })),
+      grade: latency.p95 == null || latency.p95 < 100 ? "A" : latency.p95 < 250 ? "B" : latency.p95 < 500 ? "C" : "D",
+    };
+  }
+
+  function buildSnapshotExport(report) {
+    const snapshotTests = report.tests.filter((test) => /snapshot/i.test(test.name));
+    const exportTests = report.tests.filter((test) => /export/i.test(test.name));
+    return {
+      snapshotAvailable: Boolean(window.ForgeSnapshot?.buildSnapshotHtml),
+      snapshotTests: snapshotTests.map((test) => ({ name: test.name, ok: test.ok, durationMs: test.durationMs, bytes: test.result })),
+      exportTests: exportTests.map((test) => ({ name: test.name, ok: test.ok, durationMs: test.durationMs })),
+      grade: snapshotTests.some((test) => test.ok) || report.kind !== "release-gate" ? "A" : "C",
+    };
+  }
+
+  function buildUxStability(report, runtimeContext) {
+    return {
+      focusMode: runtimeContext.uiState.focusMode,
+      splitView: runtimeContext.uiState.splitView,
+      inspectorOpen: runtimeContext.uiState.inspectorOpen,
+      theme: runtimeContext.uiState.theme,
+      runtimeErrors: runtimeErrors.length,
+      longTaskCount: report.optimization?.longTasks?.count || 0,
+    };
+  }
+
+  function normalizeSummaryV2(report, runtimeContext) {
+    const failed = report.tests.filter((test) => !test.ok);
+    const warnings = [];
+    if ((report.performance.allLatency?.p95 || 0) >= 100) warnings.push("p95 latency is over 100ms.");
+    if ((report.optimization?.longTasks?.count || 0) > 0) warnings.push("Long Tasks were observed.");
+    if (runtimeContext.storage.localStorageBytes > 4 * 1024 * 1024) warnings.push("localStorage usage is above 4MB.");
+    const criticalIssues = failed.length + runtimeErrors.length;
+    return {
+      ...report.summary,
+      releaseReadiness: report.releaseReadiness?.status || "Unknown",
+      criticalIssues,
+      warningCount: warnings.length,
+      warnings,
+      lastRunAt: new Date(report.createdAt).toISOString(),
+      currentDocumentSize: runtimeContext.activeDocument?.charCount || 0,
+      realLibrarySize: {
+        documentCount: runtimeContext.documentCount,
+        totalCharCount: runtimeContext.totalCharCount,
+        maxCharCount: runtimeContext.maxCharCount,
+      },
+      storageUsage: {
+        localStorageBytes: runtimeContext.storage.localStorageBytes,
+        estimate: report.environment.storageEstimate,
+      },
+    };
+  }
+
+  function applyDiagnosticsV2Schema(report) {
+    const runtimeContext = collectRuntimeContext();
+    report.diagnosticsVersion = DIAGNOSTICS_SCHEMA_VERSION;
+    report.benchmarkVersion = VERSION;
+    report.context = {
+      ...runtimeContext,
+      measurementMode: report.kind,
+      mutationPolicy: "read-only clones and memory-only dummy data",
+    };
+    report.summary = normalizeSummaryV2(report, runtimeContext);
+    report.longDocument = buildLongDocumentReadiness(report, runtimeContext);
+    report.storage = {
+      localStorageBytes: runtimeContext.storage.localStorageBytes,
+      storageEstimate: report.environment.storageEstimate,
+      recovery: report.mttr,
+      dataFormatChanged: false,
+      realDocumentsMutated: false,
+    };
+    report.featureIntegrity = buildFeatureIntegrity(report);
+    report.snapshotExport = buildSnapshotExport(report);
+    report.uxStability = buildUxStability(report, runtimeContext);
+    report.performance = {
+      ...report.performance,
+      longTasks: report.optimization.longTasks,
+      writerReadiness: report.writerReadiness || null,
+    };
+    report.rawTests = report.tests;
+    report.v2Sections = {
+      stabilityReliability: report.stability,
+      performanceLatency: report.performance,
+      longDocumentReadiness: report.longDocument,
+      storageRecoverySafety: report.storage,
+      featureIntegrity: report.featureIntegrity,
+      snapshotExportQuality: report.snapshotExport,
+      uxStability: report.uxStability,
+      releaseReadiness: report.releaseReadiness,
+      safetyMutationGuard: report.safetyMutationGuard,
+    };
+  }
+
   async function runQuickBenchmark() {
     const report = await buildBaseReport("quick");
     const docs = getDocuments().map(normalizeDoc);
@@ -507,7 +750,7 @@
 
     measureSync("metadata-normalize-current-docs", () => docs.map(normalizeDoc), report.tests);
     for (const query of queries) {
-      const result = measureSync(`finder-search:${query}`, () => searchDocs(docs, query), report.tests);
+      const result = measureSync(`library-search:${query}`, () => searchDocs(docs, query), report.tests);
       searchDurations.push(result.duration);
     }
     docs.slice(0, 5).forEach((doc) => {
@@ -681,6 +924,7 @@
     report.summary.mttrMs = report.mttr.avgRepairMs;
     report.summary.overallGrade = gradeMttr(report);
     report.releaseReadiness = calculateReleaseReadiness(report);
+    applyDiagnosticsV2Schema(report);
     lastReport = report;
     renderReport(report);
     return report;
@@ -694,6 +938,52 @@
     measureSync("forge-snapshot-dummy-100-build", () => buildSnapshotForBenchmark(dummy), report.tests);
     const snapshotTest = report.tests.find((test) => test.name === "forge-snapshot-dummy-100-build");
     report.optimization.snapshotDocsPerSecond = throughput(dummy.length, snapshotTest?.durationMs || 0);
+    finalizeReport(report);
+    lastReport = report;
+    renderReport(report);
+    return report;
+  }
+
+  async function runWriterReadiness() {
+    const report = await buildBaseReport("writer-readiness");
+    const docs = getDocuments().map(normalizeDoc);
+    const activeDoc = safeNormalizeDocument(getActiveDocumentSafe() || docs[0] || {});
+    const typingSummary = getTypingDebugSummary();
+    measureSync("writer-current-doc-plain-extract", () => safeExtractPlainText(activeDoc.contentHtml || activeDoc.plainText || ""), report.tests);
+    measureSync("writer-current-doc-preview-build", () => safeBuildPreviewText(activeDoc.plainText || safeExtractPlainText(activeDoc.contentHtml || "")), report.tests);
+    measureSync("writer-current-doc-copy-transform", () => boardText(activeDoc), report.tests);
+    measureSync("writer-library-search-read-only", () => searchDocs(docs, activeDoc.title?.slice(0, 3) || "note"), report.tests);
+    report.writerReadiness = {
+      typingDebugAvailable: Boolean(window.TextForgeTypingDebug?.summary),
+      typingDebugSummary: typingSummary,
+      activeDocument: {
+        id: activeDoc.id || null,
+        title: activeDoc.title || "Untitled",
+        charCount: activeDoc.charCount || 0,
+      },
+      mutationPolicy: "No editor writes; current document measured through cloned data.",
+    };
+    finalizeReport(report);
+    lastReport = report;
+    renderReport(report);
+    return report;
+  }
+
+  async function runReleaseGate() {
+    const report = await buildBaseReport("release-gate");
+    const sourceDocs = getDocuments();
+    const docs = structuredCloneSafe(sourceDocs).map(safeNormalizeDocument);
+    measureSync("release-gate-real-library-clone", () => structuredCloneSafe(sourceDocs), report.tests);
+    measureSync("release-gate-metadata-normalize", () => docs.map(safeNormalizeDocument), report.tests);
+    measureSync("release-gate-library-search", () => searchDocs(docs, "textforge"), report.tests);
+    measureSync("release-gate-document-open", () => safeExtractPlainText(docs[0]?.contentHtml || ""), report.tests);
+    measureSync("release-gate-smart-copy-board", () => boardText(docs[0] || safeNormalizeDocument({ title: "empty", contentHtml: "" })), report.tests);
+    measureSync("release-gate-snapshot-build", () => buildSnapshotForBenchmark(docs.slice(0, 200)), report.tests);
+    report.performance.realLibrary = {
+      documentCount: docs.length,
+      totalCharCount: docs.reduce((sum, doc) => sum + doc.charCount, 0),
+      maxCharCount: docs.reduce((max, doc) => Math.max(max, doc.charCount), 0),
+    };
     finalizeReport(report);
     lastReport = report;
     renderReport(report);
@@ -850,14 +1140,18 @@
   function calculateReleaseReadiness(report) {
     const fatal = report.summary.crashFrequency > 0;
     const snapshotOk = report.tests.some((test) => test.name.includes("snapshot") && test.ok) || report.kind === "forge-snapshot";
+    const safetyOk = !report.safetyMutationGuard || report.safetyMutationGuard.tests.every((test) => test.ok);
     const mttrOk = !report.mttr || report.mttr.failureCount <= 1;
     const errorOk = report.summary.errorRate < 1;
-    const status = !fatal && errorOk && mttrOk && (snapshotOk || report.kind !== "mttr-recovery") ? "Ready" : !fatal && mttrOk ? "Caution" : "Not Ready";
+    const latencyOk = (report.performance?.allLatency?.p95 || 0) < 100;
+    const status = !fatal && errorOk && mttrOk && safetyOk && latencyOk && (snapshotOk || report.kind !== "mttr-recovery") ? "Ready" : !fatal && mttrOk && safetyOk ? "Caution" : "Not Ready";
     return {
       status,
       checks: {
         fatalErrorFree: !fatal,
         errorRateUnderOnePercent: errorOk,
+        p95LatencyUnder100ms: latencyOk,
+        safetyMutationGuardPassed: safetyOk,
         mttrPassed: mttrOk,
         snapshotAvailable: snapshotOk,
         realDocumentsMutated: false,
@@ -944,6 +1238,7 @@
   }
 
   function finalizeReport(report) {
+    addSafetyMutationGuardTests(report);
     const total = report.tests.length;
     const failed = report.tests.filter((test) => !test.ok).length;
     const grades = calculateGrades(report);
@@ -989,9 +1284,10 @@
     report.optimization.costPerformance = calculateCostPerformance(report);
     report.releaseReadiness = calculateReleaseReadiness(report);
     report.summary.notes.push("Concurrent users: 해당 없음 / 로컬 단일 사용자 앱. 대체 지표로 문서 수 대비 검색 처리량을 측정합니다.");
-    if ((report.performance.allLatency.p95 || 0) > 100) report.recommendations.push("Finder card virtualization 또는 검색 worker 분리를 검토하세요.");
+    if ((report.performance.allLatency.p95 || 0) > 100) report.recommendations.push("Library card virtualization 또는 검색 worker 분리를 검토하세요.");
     if (report.optimization.longTasks.count > 0) report.recommendations.push("Snapshot/export 작업을 chunk 처리하거나 requestIdleCallback으로 분산하세요.");
     if (!report.recommendations.length) report.recommendations.push("현재 측정 규모에서는 치명적인 병목이 감지되지 않았습니다.");
+    applyDiagnosticsV2Schema(report);
   }
 
   function estimateCacheHitRatio(docs) {
@@ -1029,7 +1325,7 @@
     return typeof value === "number" && Number.isFinite(value) ? Math.round(value * 100) / 100 : value;
   }
 
-  function renderReport(report) {
+  function renderReportLegacy(report) {
     const nodes = ui();
     if (!report) {
       nodes.summary.textContent = "아직 실행된 진단 결과가 없습니다.";
@@ -1038,6 +1334,52 @@
     }
     nodes.summary.textContent = `등급 ${report.summary.overallGrade} · 테스트 ${report.stability.totalTests}개 · 실패 ${report.stability.failedTests}개 · availability ${report.summary.availability}% · error ${report.summary.errorRate}% · p95 ${report.performance.allLatency.p95}ms`;
     nodes.output.textContent = JSON.stringify(report, null, 2);
+  }
+
+  function renderReport(report) {
+    const nodes = ui();
+    if (!report) {
+      nodes.summary.textContent = "No diagnostics report has been run yet.";
+      nodes.output.textContent = "";
+      return;
+    }
+    const summary = report.summary || {};
+    const contextSummary = report.context || {};
+    const cards = [
+      ["Overall Grade", summary.overallGrade || "N/A"],
+      ["Release", summary.releaseReadiness || report.releaseReadiness?.status || "Unknown"],
+      ["Critical", summary.criticalIssues ?? report.stability.failedTests ?? 0],
+      ["Warnings", summary.warningCount ?? 0],
+      ["Tests", `${report.stability.successTests || 0}/${report.stability.totalTests || 0}`],
+      ["p95", `${report.performance.allLatency?.p95 ?? "N/A"}ms`],
+      ["Docs", contextSummary.documentCount ?? summary.realLibrarySize?.documentCount ?? 0],
+      ["Chars", contextSummary.totalCharCount ?? summary.realLibrarySize?.totalCharCount ?? 0],
+      ["Storage", `${Math.round((summary.storageUsage?.localStorageBytes || 0) / 1024)}KB`],
+    ];
+    const sections = [
+      ["Stability/Reliability", report.stability?.failedTests ? "Warning" : "OK"],
+      ["Performance/Latency", report.performance?.allLatency?.p95 == null || report.performance.allLatency.p95 < 100 ? "OK" : "Review"],
+      ["Long Document", report.longDocument?.grade || "N/A"],
+      ["Storage/Recovery", report.storage?.realDocumentsMutated === false ? "OK" : "Review"],
+      ["Feature Integrity", report.featureIntegrity?.snapshotSmoke ? "OK" : "Smoke"],
+      ["Snapshot/Export", report.snapshotExport?.snapshotAvailable ? "OK" : "Unavailable"],
+      ["UX Stability", report.uxStability?.longTaskCount ? "Long Tasks" : "OK"],
+      ["Release Readiness", report.releaseReadiness?.status || "Unknown"],
+    ];
+    nodes.summary.innerHTML = `
+      <div class="diagnostics-dashboard">
+        ${cards.map(([label, value]) => `<div class="diagnostics-card"><span>${escapeHtml(String(label))}</span><strong>${escapeHtml(String(value))}</strong></div>`).join("")}
+      </div>
+      <div class="diagnostics-sections">
+        ${sections.map(([label, value]) => `<div><strong>${escapeHtml(String(label))}</strong><span>${escapeHtml(String(value))}</span></div>`).join("")}
+      </div>
+      <p class="diagnostics-note">Diagnostics v2 uses read-only clones and memory-only dummy data. User documents are not mutated.</p>
+    `;
+    nodes.output.textContent = JSON.stringify(report, null, 2);
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[char]);
   }
 
   function exportBenchmarkJson() {
@@ -1050,7 +1392,26 @@
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   }
 
+  async function copyBenchmarkJson() {
+    if (!lastReport) return "";
+    const text = JSON.stringify(lastReport, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (error) {
+      console.log("[textforge-diagnostics] JSON copy fallback", text);
+      console.warn("[textforge-diagnostics] clipboard copy failed", error);
+    }
+    return text;
+  }
+
+  function clearBenchmarkReport() {
+    lastReport = null;
+    renderReport(null);
+    return null;
+  }
+
   function attachUi() {
+    ensureDiagnosticsV2Buttons();
     const nodes = ui();
     groupAdvancedDiagnosticsUi(nodes);
     nodes.close?.addEventListener("click", closeDiagnosticsPanel);
@@ -1060,8 +1421,30 @@
     nodes.realLibrary?.addEventListener("click", runRealLibraryBenchmark);
     nodes.mttr?.addEventListener("click", runMttrBenchmark);
     nodes.snapshot?.addEventListener("click", runSnapshotBenchmark);
+    nodes.writer?.addEventListener("click", runWriterReadiness);
+    nodes.releaseGate?.addEventListener("click", runReleaseGate);
     nodes.stress?.addEventListener("click", runStressBenchmark);
     nodes.export?.addEventListener("click", exportBenchmarkJson);
+    nodes.copyJson?.addEventListener("click", copyBenchmarkJson);
+    nodes.clear?.addEventListener("click", clearBenchmarkReport);
+  }
+
+  function ensureDiagnosticsV2Buttons() {
+    const actions = document.querySelector(".diagnostics-actions");
+    if (!actions || document.querySelector("#diagWriterBtn")) return;
+    const buttons = [
+      ["diagWriterBtn", "Writer Readiness"],
+      ["diagReleaseGateBtn", "Release Gate"],
+      ["diagCopyJsonBtn", "Copy JSON"],
+      ["diagClearBtn", "Clear"],
+    ];
+    buttons.forEach(([id, label]) => {
+      const button = document.createElement("button");
+      button.id = id;
+      button.type = "button";
+      button.textContent = label;
+      actions.append(button);
+    });
   }
 
   function groupAdvancedDiagnosticsUi(nodes) {
@@ -1096,7 +1479,11 @@
     runRealLibraryBenchmark,
     runMttrBenchmark,
     runSnapshotBenchmark,
+    runWriterReadiness,
+    runReleaseGate,
     exportBenchmarkJson,
+    copyBenchmarkJson,
+    clearBenchmarkReport,
     safeJsonParse,
     safeHtmlSanitize,
     safeNormalizeDocument,

@@ -16,10 +16,12 @@ const types = {
 
 http
   .createServer((req, res) => {
-    const urlPath = req.url === "/" ? "index.html" : decodeURIComponent(req.url.slice(1));
+    const requestUrl = new URL(req.url, "http://127.0.0.1");
+    const urlPath = requestUrl.pathname === "/" ? "index.html" : decodeURIComponent(requestUrl.pathname.slice(1));
     const filePath = path.resolve(root, urlPath);
+    const relativePath = path.relative(root, filePath);
 
-    if (!filePath.startsWith(root)) {
+    if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
       res.writeHead(403);
       res.end("Forbidden");
       return;
@@ -37,5 +39,5 @@ http
     });
   })
   .listen(port, "127.0.0.1", () => {
-    console.log(`TextForge MVP running at http://127.0.0.1:${port}`);
+    console.log(`TextForge v1.0 Local running at http://127.0.0.1:${port}`);
   });
